@@ -24,9 +24,6 @@ targets = [
 ]
 # Where to host releases
 hosting = "github"
-# Also expose a manual `workflow_dispatch` trigger (Actions tab) alongside the
-# vX.Y.Z tag-push trigger, so releases can be kicked off transparently from the UI.
-dispatch-releases = true
 
 # Build arm64 Windows natively on GitHub's ARM Windows runner (free for public
 # repos) instead of cargo-dist's default of cross-compiling it from Linux via
