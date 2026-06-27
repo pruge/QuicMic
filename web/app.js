@@ -39,6 +39,7 @@ let isReconnecting = false;  // A reconnect cycle is currently in progress.
 let isConnecting = false;    // A transport connect attempt is in progress.
 let wasLongPressed = false;
 let transportType = 'none';
+let wtFallbackNotified = false;  // One-time WebSocket-fallback warning per stream.
 let isPowerSaveActive = false;
 let lastVuUpdateTime = 0;
 let wakeLock = null;         // Screen Wake Lock sentinel (held during Eco Mode).
@@ -704,6 +705,7 @@ async function startStreaming() {
         packetsSent = 0;
         startTime = Date.now();
         reconnectAttempts = 0;
+        wtFallbackNotified = false;
 
         // Establish transport connection.
         try {
@@ -837,17 +839,12 @@ async function connectWebTransport(sampleRate) {
     });
     const activeTransport = transport;
 
-    const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('WebTransport connection timeout')), 1000)
-    );
-    await Promise.race([transport.ready, timeoutPromise]);
-
-    datagramWriter = transport.datagrams.writable.getWriter();
-    transportType = 'WebTransport';
-    console.log('[transport] connected via WebTransport (QUIC/UDP)');
-
-    // Both the clean (.then) and errored (.catch) paths — for any close code —
-    // funnel into the single transport-agnostic close handler.
+    // Register the close handler immediately — before awaiting `ready` — so that if
+    // the connection never establishes (e.g. UDP blocked), the rejected `closed`
+    // promise is still handled instead of surfacing as an unhandled rejection. Both
+    // the clean (.then) and errored (.catch) paths, for any close code, funnel into
+    // the single transport-agnostic handler, which ignores events while still
+    // connecting (isConnecting guard).
     transport.closed
         .then((info) => onTransportClosed('WebTransport', activeTransport, {
             clean: true,
@@ -859,6 +856,15 @@ async function connectWebTransport(sampleRate) {
             code: err && err.closeCode,
             reason: (err && err.message) || String(err),
         }));
+
+    const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('WebTransport connection timeout')), 1000)
+    );
+    await Promise.race([transport.ready, timeoutPromise]);
+
+    datagramWriter = transport.datagrams.writable.getWriter();
+    transportType = 'WebTransport';
+    console.log('[transport] connected via WebTransport (QUIC/UDP)');
 }
 
 async function connectWebSocket(sampleRate) {
@@ -879,6 +885,16 @@ async function connectWebSocket(sampleRate) {
             clearTimeout(timeoutId);
             transportType = 'WebSocket';
             console.log('[transport] connected via WebSocket (TCP — fallback)');
+            // If the browser supports WebTransport yet we still landed on WebSocket,
+            // the low-latency UDP/QUIC path failed. On a LAN the overwhelming cause is
+            // a blocked UDP port (a healthy QUIC handshake is sub-second), so we give
+            // the direct, actionable hint. Warn once per stream (the stat panel only
+            // shows the transport name); browsers without WebTransport skip this (WS
+            // is the expected transport there).
+            if (('WebTransport' in window) && !wtFallbackNotified) {
+                wtFallbackNotified = true;
+                showToast('Using WebSocket fallback — WebTransport (UDP) unavailable. Allow UDP on port 8443 in your firewall for lower latency.');
+            }
             resolve();
         };
 
@@ -1161,8 +1177,12 @@ async function fetchServerStats() {
     }
 
     // The server is alive but reports no active connection: our stream dropped
-    // server-side. Recover it transparently (reconnect).
-    if (isStreaming && !isReconnecting && !data.connected) {
+    // server-side. Recover it transparently (reconnect). Skip while a connection
+    // attempt is still in progress (`isConnecting`) — during the initial connect
+    // (or a slow WebTransport handshake before the WebSocket fallback) the server
+    // legitimately reports `connected: false`, and triggering recovery here would
+    // renew the session token mid-connect and invalidate the in-flight transport.
+    if (isStreaming && !isReconnecting && !isConnecting && !data.connected) {
         console.warn('[stats] server reports no active connection -> recovering');
         handleUnexpectedDisconnect();
     }
