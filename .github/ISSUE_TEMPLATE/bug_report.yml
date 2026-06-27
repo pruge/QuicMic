@@ -1,0 +1,100 @@
+name: Bug report
+description: Report a problem with QuicMic
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug! The **server terminal logs** and the **phone's browser console logs** are by far the most useful — please include them if you can.
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what went wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `quicmic ...`
+        2. On the phone, open / scan ...
+        3. Tap ...
+        4. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: false
+  - type: dropdown
+    id: server-os
+    attributes:
+      label: Server OS (the PC running QuicMic)
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: QuicMic version
+      description: From the startup banner or `quicmic --version`.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Virtual audio device
+      placeholder: "VB-CABLE / BlackHole / PulseAudio null-sink"
+    validations:
+      required: false
+  - type: input
+    id: client
+    attributes:
+      label: Phone / browser
+      description: Device, OS version, and browser.
+      placeholder: "iPhone 13, iOS 18.1, Safari"
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport in use
+      description: Shown as "Transport" in the on-screen stats.
+      options:
+        - WebTransport
+        - WebSocket
+        - Not sure / never connected
+    validations:
+      required: false
+  - type: textarea
+    id: server-logs
+    attributes:
+      label: Server logs
+      description: Output from the QuicMic terminal. For more detail, run with `RUST_LOG=debug`.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: client-logs
+    attributes:
+      label: Browser console logs
+      description: From the phone's browser console (on iOS, via Safari Web Inspector). QuicMic's logs are tagged, e.g. `[transport]`, `[reconnect]`, `[stats]`.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Network (Wi-Fi band, VPN), firewall/antivirus, or anything else that might help.
+    validations:
+      required: false

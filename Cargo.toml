@@ -1,0 +1,88 @@
+[package]
+name = "quicmic"
+version = "0.1.0"
+edition = "2021"
+description = "Turn any device with a microphone and a web browser into a wireless PC microphone over WebTransport"
+license = "GPL-3.0-or-later"
+readme = "README.md"
+keywords = ["microphone", "audio", "webtransport", "streaming", "lan"]
+categories = ["multimedia::audio", "network-programming", "web-programming"]
+repository = "https://github.com/Fix3dll/QuicMic"
+
+[dependencies]
+# Web framework & transport
+axum = { version = "0.8", features = ["ws", "macros"] }
+# `tls-rustls-no-provider` (instead of `tls-rustls`) avoids pulling in the
+# aws-lc-rs crypto backend: we install the `ring` provider ourselves at startup
+# (`rustls::crypto::ring::default_provider().install_default()` in main), so the
+# whole tree stays ring-only — no aws-lc-sys, hence no C compiler / NASM build
+# dependency.
+axum-server = { version = "0.8", default-features = false, features = [
+    "tls-rustls-no-provider",
+] }
+wtransport = { version = "0.7.1", features = ["self-signed"] }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "signal",
+    "time",
+    "sync",
+    "fs",
+    "net",
+    "io-util",
+] }
+
+# Audio output
+cpal = "0.18"
+
+# TLS & cryptography.
+# `default-features = false` drops rustls's default aws-lc-rs provider (and the
+# `prefer-post-quantum` default, which also requires aws-lc-rs); we use the `ring`
+# provider exclusively. `std`/`tls12`/`logging` are re-enabled because they are
+# default features we still rely on.
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+    "logging",
+] }
+# Outbound TLS for the startup update check (client side). `tokio-rustls` and
+# `rustls-native-certs` are already in the tree (via axum-server); declaring them
+# here adds no new compiled crate. `default-features = false` keeps the aws-lc-rs
+# provider out — the update check uses the same process-default `ring` provider.
+tokio-rustls = { version = "0.26", default-features = false, features = [
+    "ring",
+    "tls12",
+    "logging",
+] }
+rustls-native-certs = "0.8"
+ring = "0.17"
+base64 = "0.22"
+
+# Concurrency
+parking_lot = "0.12"
+
+# Networking & utilities
+local-ip-address = "0.6"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive", "env"] }
+rand = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rust-embed = "8.11.0"
+mime_guess = "2.0"
+anyhow = "1"
+http = "1"
+qr2term = "0.3"
+
+[dev-dependencies]
+# `tower`'s `util` feature provides `ServiceExt::oneshot`, used to drive the axum
+# router in-process for the HTTP API tests (no real socket or audio device).
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

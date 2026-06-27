@@ -1,0 +1,139 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Binary (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: quicmic-linux-amd64.tar.gz
+          - os: windows-latest
+            asset: quicmic-windows-amd64.zip
+          - os: macos-latest # Apple Silicon (arm64)
+            asset: quicmic-macos-arm64.zip
+          - os: macos-13 # Intel (x86_64)
+            asset: quicmic-macos-amd64.zip
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install System Dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}-release
+
+      - name: Build Binary
+        run: cargo build --release
+
+      - name: Package & checksum (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          Compress-Archive -Path target/release/quicmic.exe -DestinationPath ${{ matrix.asset }}
+          ((Get-FileHash ${{ matrix.asset }} -Algorithm SHA256).Hash.ToLower() + "  ${{ matrix.asset }}") | Out-File -Encoding ascii ${{ matrix.asset }}.sha256
+
+      - name: Package & checksum (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          tar -czvf ${{ matrix.asset }} -C target/release quicmic
+          sha256sum ${{ matrix.asset }} > ${{ matrix.asset }}.sha256
+
+      - name: Package & checksum (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          zip -j ${{ matrix.asset }} target/release/quicmic
+          shasum -a 256 ${{ matrix.asset }} > ${{ matrix.asset }}.sha256
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.os }}-artifact
+          path: |
+            ${{ matrix.asset }}
+            ${{ matrix.asset }}.sha256
+          retention-days: 1
+
+  create-release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # Necessary to fetch tags for version calculations
+
+      - name: Extract Version & Configure Git
+        run: |
+          VERSION=$(grep '^version =' Cargo.toml | head -n1 | cut -d '"' -f2)
+          TAG_NAME="v$VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+          
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create Git Tag
+        run: |
+          if git rev-parse "${{ env.TAG_NAME }}" >/dev/null 2>&1; then
+            echo "Tag ${{ env.TAG_NAME }} already exists. Re-using existing tag."
+          else
+            git tag "${{ env.TAG_NAME }}"
+            git push origin "${{ env.TAG_NAME }}"
+          fi
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # Generate the third-party license attribution and ship it as a release
+      # asset, so the distributed binaries carry the notices their (permissive)
+      # dependency licenses require. cargo-about only resolves the dependency
+      # graph — it does not build the project — so no system audio deps are needed.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-about
+        # The `cargo-about` binary is gated behind the (non-default) `cli` feature,
+        # so it must be enabled explicitly — otherwise no binary is installed.
+        run: cargo install cargo-about --locked --features cli
+
+      - name: Generate third-party licenses
+        run: cargo about generate about.hbs -o artifacts/THIRD-PARTY-LICENSES.html
+
+      - name: Publish GitHub Release (Official GitHub CLI)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Idempotent: if the release for this tag already exists (e.g. the
+          # workflow is re-dispatched without a version bump), refresh its assets
+          # instead of failing; otherwise create it.
+          if gh release view "${{ env.TAG_NAME }}" >/dev/null 2>&1; then
+            echo "Release ${{ env.TAG_NAME }} already exists — updating assets."
+            gh release upload "${{ env.TAG_NAME }}" artifacts/* --clobber
+          else
+            gh release create "${{ env.TAG_NAME }}" \
+              --title "Release ${{ env.TAG_NAME }}" \
+              --generate-notes \
+              artifacts/*
+          fi

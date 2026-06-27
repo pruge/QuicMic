@@ -1,0 +1,803 @@
+:root {
+    --bg-primary: #0a0a0f;
+    --bg-secondary: #12121a;
+    --bg-card: #1a1a2e;
+    --bg-glass: rgba(26, 26, 46, 0.7);
+    --border: rgba(255, 255, 255, 0.06);
+    --text-primary: #e8e8f0;
+    --text-secondary: #8888a0;
+    --text-muted: #555566;
+    --accent: #6c63ff;
+    --accent-glow: rgba(108, 99, 255, 0.3);
+    --green: #2ecc71;
+    --green-glow: rgba(46, 204, 113, 0.3);
+    --red: #e74c3c;
+    --red-glow: rgba(231, 76, 60, 0.3);
+    --yellow: #f1c40f;
+    --radius: 16px;
+    --radius-sm: 10px;
+    --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    user-select: none;
+    -webkit-user-select: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+/* ── Pairing Screen ─────────────────────────────────────── */
+
+.screen {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    max-width: 380px;
+    gap: 24px;
+    animation: fadeIn 0.4s ease;
+}
+
+.screen.active {
+    display: flex;
+    margin: auto 0;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.logo {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, var(--accent), #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.logo span {
+    -webkit-text-fill-color: var(--text-secondary);
+    font-weight: 400;
+    font-size: 14px;
+    display: block;
+    margin-top: 2px;
+}
+
+.card {
+    width: 100%;
+    background: var(--bg-glass);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.card-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.pin-input {
+    /* Left-aligned so the caret starts at the first digit and the PIN fills
+       left-to-right (it is entered from the start). The box is sized to exactly six
+       monospace digits plus their gaps and scales with the viewport, so it stays
+       snug on any screen. `ch` is the digit advance in a monospace font, so `6ch` is
+       six digits; the `6 * gap` term covers the five inter-digit gaps plus the one
+       trailing gap that letter-spacing leaves after the last digit — counting it
+       keeps a full PIN from scroll-jumping when the field is focused. */
+    --pin-gap: 0.5em;
+    --pin-pad: 18px;
+    box-sizing: content-box;
+    width: calc(6ch + 6 * var(--pin-gap));
+    max-width: 100%;
+    margin: 0 auto;
+    /* Equal visual breathing room on both sides: the left padding carries one extra
+       gap to offset that trailing letter-spacing on the right, so the digits sit
+       with the same distance to each border. */
+    padding: 16px var(--pin-pad);
+    padding-left: calc(var(--pin-pad) + var(--pin-gap));
+    background: var(--bg-primary);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: clamp(22px, 7.5vw, 32px);
+    font-weight: 700;
+    letter-spacing: var(--pin-gap);
+    text-align: left;
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color var(--transition);
+    font-family: 'SF Mono', 'Menlo', monospace;
+}
+
+/* Once all six digits are in (required + pattern="[0-9]{6}" make the field :valid),
+   hide the caret — the PIN is complete, so the blinking cursor adds nothing. */
+.pin-input:valid {
+    caret-color: transparent;
+}
+
+.pin-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* The `hidden` attribute must win over later display rules (e.g. .server-lost). */
+[hidden] {
+    display: none !important;
+}
+
+/* Shown in place of the PIN entry when the server is gone: a restarted server has a
+   new self-signed certificate, so only a full page reload can reconnect. */
+.server-lost {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    align-items: center;
+    text-align: center;
+}
+
+.server-lost-msg {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.pin-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-glow);
+}
+
+.pin-input.error {
+    border-color: var(--red);
+    box-shadow: 0 0 0 4px var(--red-glow);
+    animation: shake 0.4s ease;
+}
+
+@keyframes shake {
+
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+
+    25% {
+        transform: translateX(-8px);
+    }
+
+    75% {
+        transform: translateX(8px);
+    }
+}
+
+.btn {
+    width: 100%;
+    padding: 16px;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition);
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--accent), #8b7cf7);
+    color: white;
+}
+
+.btn-primary:active {
+    transform: scale(0.97);
+}
+
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ── Main Screen ────────────────────────────────────────── */
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 100px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.status-badge.disconnected {
+    background: rgba(231, 76, 60, 0.12);
+    color: var(--red);
+}
+
+.status-badge.connected {
+    background: rgba(46, 204, 113, 0.12);
+    color: var(--green);
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.status-badge.connected .status-dot {
+    animation: pulse 2s ease infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+        box-shadow: 0 0 0 0 var(--green-glow);
+    }
+
+    50% {
+        opacity: 0.7;
+        box-shadow: 0 0 0 6px transparent;
+    }
+}
+
+/* ── Toolbar ────────────────────────────────────────────── */
+
+.toolbar {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+    justify-content: center;
+}
+
+.tool-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 8px 16px;
+    border-radius: 100px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tool-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+}
+
+/* ── Settings Panel ────────────────────────────────────── */
+
+.settings-panel {
+    width: 100%;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.35s ease, opacity 0.35s ease, padding 0.35s ease;
+    opacity: 0;
+    padding-bottom: 0;
+}
+
+.settings-panel.active {
+    max-height: 500px;
+    opacity: 1;
+    padding-bottom: 12px;
+}
+
+.setting-row {
+    background: var(--bg-glass);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 18px 20px;
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.setting-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.setting-val {
+    font-family: 'SF Mono', 'Menlo', monospace;
+    font-size: 13px;
+    color: var(--accent);
+}
+
+/* Small dismissible "update available" bar pinned to the top. Intentionally thin
+   so it never covers the UI. */
+.update-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 8px 16px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 13px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.update-banner a {
+    color: #fff;
+    font-weight: 600;
+    text-decoration: underline;
+}
+
+.update-dismiss {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+}
+
+.update-dismiss:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* The value + reset-button pair on the right of each setting label. Replaces an
+   inline style attribute so the CSP can forbid inline styles entirely. */
+.setting-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.setting-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+/* Toggle Switch */
+.toggle {
+    position: relative;
+    display: inline-block;
+    width: 48px;
+    height: 26px;
+    flex-shrink: 0;
+}
+
+.toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 26px;
+    transition: var(--transition);
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    height: 20px;
+    width: 20px;
+    left: 2px;
+    bottom: 2px;
+    background: var(--text-muted);
+    border-radius: 50%;
+    transition: var(--transition);
+}
+
+.toggle input:checked+.toggle-slider {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.toggle input:checked+.toggle-slider::before {
+    transform: translateX(22px);
+    background: white;
+}
+
+/* Slider — large touch-friendly design */
+.slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 8px;
+    background: var(--bg-primary);
+    border-radius: 4px;
+    outline: none;
+    /* Extra vertical padding for larger touch zone */
+    padding: 12px 0;
+    margin: 0;
+    box-sizing: content-box;
+    background-clip: content-box;
+}
+
+.slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    box-shadow: 0 0 8px var(--accent-glow), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.slider::-moz-range-thumb {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 0 8px var(--accent-glow), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* ── Mute Status ───────────────────────────────────────── */
+
+.status-badge.muted {
+    background: rgba(241, 196, 15, 0.12);
+    color: var(--yellow);
+}
+
+.mic-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+    margin-top: -12px;
+}
+
+/* ── Mic Button ─────────────────────────────────────────── */
+
+.mic-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 12px 0;
+}
+
+.mic-ring {
+    position: absolute;
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    border: 3px solid var(--border);
+    transition: all 0.6s ease;
+}
+
+.mic-ring.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 40px var(--accent-glow);
+    animation: ringPulse 1.5s ease infinite;
+}
+
+/* Voice activity (gate open): brighten the ring's glow. Fades smoothly via the
+   existing .mic-ring transition; calm again during gated silence. */
+.mic-ring.active.voice {
+    border-color: #a78bfa;
+    box-shadow: 0 0 64px var(--accent-glow), 0 0 24px var(--accent);
+}
+
+@keyframes ringPulse {
+
+    0%,
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+
+    50% {
+        transform: scale(1.06);
+        opacity: 0.7;
+    }
+}
+
+.mic-btn {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    border: none;
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    font-size: 48px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition);
+    z-index: 1;
+    position: relative;
+}
+
+.mic-btn:active {
+    transform: scale(0.93);
+}
+
+.mic-btn.active {
+    background: linear-gradient(135deg, var(--accent), #8b7cf7);
+    color: white;
+    box-shadow: 0 8px 32px var(--accent-glow);
+}
+
+.mic-btn.active.muted {
+    background: linear-gradient(135deg, var(--yellow), #f39c12);
+    color: #0a0a0f;
+    box-shadow: 0 8px 32px rgba(241, 196, 15, 0.3);
+}
+
+.mic-ring.active.muted {
+    border-color: var(--yellow);
+    box-shadow: 0 0 40px rgba(241, 196, 15, 0.3);
+}
+
+/* ── VU Meter ───────────────────────────────────────────── */
+
+.vu-container {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.vu-bar-wrapper {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-primary);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.vu-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--green), var(--yellow), var(--red));
+    border-radius: 3px;
+    transition: width 60ms linear;
+}
+
+.vu-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+/* ── Stats ──────────────────────────────────────────────── */
+
+.stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    width: 100%;
+}
+
+.stat {
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.stat-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+}
+
+.stat-value {
+    font-size: 20px;
+    font-weight: 700;
+    font-family: 'SF Mono', 'Menlo', monospace;
+}
+
+.stat-value.transport {
+    font-size: 13px;
+    color: var(--accent);
+}
+
+/* ── Error Toast ────────────────────────────────────────── */
+
+.toast {
+    position: fixed;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: var(--red);
+    color: white;
+    padding: 12px 24px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    font-weight: 600;
+    opacity: 0;
+    transition: all 0.4s ease;
+    z-index: 100;
+    text-align: center;
+    max-width: 90%;
+    width: fit-content;
+}
+
+.toast.show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+}
+
+/* ── Eco Mode (Power Saver) ────────────────────────────── */
+
+.power-save-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    background: #000000;
+    z-index: 9999;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #444444;
+    text-align: center;
+    padding: 24px;
+}
+
+.power-save-overlay.active {
+    display: flex;
+}
+
+/* The hint/controls fade out a few seconds after entering Eco Mode, leaving a
+   fully black, static, non-animating screen so the OLED panel can idle. A tap
+   anywhere brings them back (handled in app.js). */
+.power-save-content {
+    transition: opacity 0.6s ease;
+}
+
+.power-save-overlay.dimmed .power-save-content {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.power-save-indicator {
+    font-size: 24px;
+    font-weight: 700;
+    color: #15803d;
+    /* Dim green */
+    margin-bottom: 8px;
+}
+
+.power-save-sub {
+    font-size: 14px;
+    color: #333333;
+    margin-bottom: 32px;
+}
+
+.power-save-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 8px 16px;
+    border-radius: 100px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.power-save-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+}
+
+.btn-secondary {
+    background: #111111;
+    color: #666666;
+    border: 1px solid #222222;
+    padding: 12px 24px;
+    font-size: 14px;
+    width: auto;
+}
+
+.btn-secondary:active {
+    background: #1a1a1a;
+}
+
+/* ── Landscape Mobile Scroll Support ───────────────────── */
+
+@media (max-height: 520px) {
+    body {
+        overflow-y: auto;
+        justify-content: flex-start;
+        padding-top: 30px;
+        padding-bottom: 30px;
+    }
+}
+
+/* ── Reset Link Button ─────────────────────── */
+.reset-link {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 2px;
+    transition: color var(--transition), transform 0.1s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.reset-link:hover {
+    color: var(--accent);
+}
+
+.reset-link:active {
+    transform: scale(0.85);
+}

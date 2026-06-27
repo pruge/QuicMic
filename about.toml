@@ -1,0 +1,43 @@
+# cargo-about configuration — generates THIRD-PARTY-LICENSES.html listing the
+# licenses of all dependencies compiled into the shipped binary, satisfying the
+# attribution their (permissive) licenses require when distributing releases.
+#
+# Regenerate locally with (the `cli` feature is required for the binary):
+#   cargo install cargo-about --locked --features cli
+#   cargo about generate about.hbs -o THIRD-PARTY-LICENSES.html
+#
+# The release workflow runs this automatically and attaches the result to the
+# GitHub Release, so the notice is distributed alongside the binaries.
+
+# Only consider the platforms we actually ship a binary for, so platform-specific
+# dependencies that are never compiled into a release (e.g. cpal's Android/wasm
+# backends) don't show up in the attribution.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+
+# Build- and dev-dependencies are not part of the distributed binary, so they need
+# no attribution.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# Accepted licenses (all GPL-3.0-compatible). Generation fails if a dependency
+# uses a license not listed here — a built-in compliance gate that flags any new
+# dependency introducing an unexpected or incompatible license.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "BSL-1.0",
+    "Unlicense",
+    "GPL-3.0-or-later",
+]

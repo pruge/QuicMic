@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0a0a0f">
+    <title>QuicMic</title>
+    <!-- Inline base64 favicon (custom hand-drawn microphone; no third-party
+         artwork, no separate files). apple-touch-icon for Apple. -->
+    <link rel="icon" type="image/png" href="data:image/png;base64,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">
+    <link rel="apple-touch-icon" href="data:image/png;base64,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">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- Update notice: a small, dismissible bar shown only when the server's
+         startup check found a newer release. Links to the GitHub releases page. -->
+    <div id="update-banner" class="update-banner" hidden>
+        <span id="update-text"></span>
+        <a id="update-link" href="#" target="_blank" rel="noopener">Releases ↗</a>
+        <button id="update-dismiss" class="update-dismiss" aria-label="Dismiss update notice">✕</button>
+    </div>
+
+    <!-- Pairing Screen -->
+    <div id="pair-screen" class="screen active">
+        <div class="logo">
+            QuicMic
+            <span>Wireless Microphone</span>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Enter Pairing PIN</div>
+            <input type="tel" id="pin-input" class="pin-input" maxlength="6" inputmode="numeric" pattern="[0-9]{6}"
+                required placeholder="——————" autocomplete="off" aria-label="6-digit pairing PIN">
+            <button id="pair-btn" class="btn btn-primary">Connect</button>
+        </div>
+
+        <div id="server-lost" class="server-lost" role="alert" hidden>
+            <div class="server-lost-msg">Connection to the server was lost.<br>Refresh the page to reconnect.</div>
+            <button id="reload-btn" class="btn btn-primary">Reload</button>
+        </div>
+    </div>
+
+    <!-- Main Screen -->
+    <div id="main-screen" class="screen">
+        <div class="logo">
+            QuicMic
+        </div>
+
+        <div id="status-badge" class="status-badge disconnected" role="status" aria-live="polite">
+            <div class="status-dot" aria-hidden="true"></div>
+            <span id="status-text">Idle</span>
+        </div>
+
+        <div class="toolbar">
+            <button id="power-save-btn" class="tool-btn">🔋 Eco</button>
+            <button id="settings-btn" class="tool-btn">⚙️ Settings</button>
+        </div>
+
+        <!-- Settings Panel -->
+        <div id="settings-panel" class="settings-panel">
+            <div class="setting-row">
+                <div class="setting-label">
+                    <span>Noise Gate</span>
+                    <div class="setting-control">
+                        <span id="ng-value" class="setting-val">-50 dB</span>
+                        <button id="ng-reset" class="reset-link" title="Reset to default"
+                            aria-label="Reset noise gate to default">🔄</button>
+                    </div>
+                </div>
+                <input type="range" id="ng-slider" class="slider" min="-100" max="0" step="1"
+                    value="-50">
+            </div>
+            <div class="setting-row">
+                <div class="setting-label">
+                    <span>Gain</span>
+                    <div class="setting-control">
+                        <span id="gain-value" class="setting-val">1.0x</span>
+                        <button id="gain-reset" class="reset-link" title="Reset to default"
+                            aria-label="Reset gain to default">🔄</button>
+                    </div>
+                </div>
+                <input type="range" id="gain-slider" class="slider" min="0.2" max="3.0" step="0.1" value="1.0">
+            </div>
+            <div class="setting-row">
+                <div class="setting-label">
+                    <span>Latency Recovery</span>
+                    <div class="setting-control">
+                        <span id="lr-value" class="setting-val">150 ms</span>
+                        <button id="lr-reset" class="reset-link" title="Reset to default"
+                            aria-label="Reset latency recovery to default">🔄</button>
+                    </div>
+                </div>
+                <input type="range" id="lr-slider" class="slider" min="0" max="500" step="10" value="150">
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="mic-container">
+                <div id="mic-ring" class="mic-ring"></div>
+                <button id="mic-btn" class="mic-btn" aria-label="Start or stop microphone">
+                    <span id="mic-icon" aria-hidden="true">🎙</span>
+                </button>
+            </div>
+            <div id="mic-hint" class="mic-hint">Tap to start streaming</div>
+
+            <div class="vu-container">
+                <div class="vu-bar-wrapper">
+                    <div id="vu-bar" class="vu-bar"></div>
+                </div>
+                <div class="vu-label">
+                    <span>Level</span>
+                    <span id="vu-level">0%</span>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="stats">
+            <div class="stat">
+                <span class="stat-label">Transport</span>
+                <span id="stat-transport" class="stat-value transport">—</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">API RTT (ping)</span>
+                <span id="stat-ping" class="stat-value">—</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Buffer</span>
+                <span id="stat-buffer" class="stat-value">—</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Packets</span>
+                <span id="stat-packets" class="stat-value">0</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Uptime</span>
+                <span id="stat-uptime" class="stat-value">—</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Loss</span>
+                <span id="stat-loss" class="stat-value">0.00%</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Power Saver Overlay -->
+    <div id="power-save-overlay" class="power-save-overlay">
+        <div class="power-save-content">
+            <div class="power-save-indicator">Eco Mode Active</div>
+            <div class="power-save-sub">Microphone streaming is active in background</div>
+            <button id="exit-power-save-btn" class="btn btn-secondary">Exit Eco Mode</button>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
