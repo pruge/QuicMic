@@ -4,8 +4,8 @@
 
 <p align="center">
   <a href="LICENSE.md"><img alt="License: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-blue"></a>
-  <img alt="Platforms: Windows, macOS, Linux" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey">
-  <img alt="Built with Rust" src="https://img.shields.io/badge/built%20with-Rust-orange">
+  <a href="https://github.com/Fix3dll/QuicMic/releases"><img alt="Platforms: Windows, macOS, Linux" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey"></a>
+  <a href="https://www.rust-lang.org"><img alt="Built with Rust" src="https://img.shields.io/badge/built%20with-Rust-orange"></a>
 </p>
 
 QuicMic runs a tiny server on your computer and serves a web page to your phone. The phone captures your microphone and streams raw PCM audio back over **WebTransport (QUIC/UDP)** — with an automatic **WebSocket (TCP)** fallback — into a virtual audio device, so any app on your PC (Discord, OBS, Zoom, games…) can use your phone as a microphone.
@@ -80,7 +80,7 @@ Your apps can then use the sink's monitor as a microphone source.
 
 ### Download a release
 
-Grab the latest binary for your platform from the [**Releases**](https://github.com/Fix3dll/QuicMic/releases) page, unzip it, and run it from a terminal.
+Grab the latest binary for your platform (Windows/Linux/macOS, x86_64 and arm64) from the [**Releases**](https://github.com/Fix3dll/QuicMic/releases) page, extract it (`.zip` on Windows, `.tar.xz` on Linux/macOS), and run it from a terminal.
 
 > **Unsigned binaries.** The release builds are not code-signed, so the OS may warn on first run:
 > - **Windows (SmartScreen):** click **More info → Run anyway**.
