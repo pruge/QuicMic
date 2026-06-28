@@ -10,7 +10,7 @@
 
 QuicMic runs a tiny server on your computer and serves a web page to your phone. The phone captures your microphone and streams raw PCM audio back over **WebTransport (QUIC/UDP)** — with an automatic **WebSocket (TCP)** fallback — into a virtual audio device, so any app on your PC (Discord, OBS, Zoom, games…) can use your phone as a microphone.
 
-![QuicMic terminal UI](assets/tui.png)
+![QuicMic terminal UI](https://raw.githubusercontent.com/Fix3dll/QuicMic/main/assets/tui.png)
 
 ---
 
@@ -29,7 +29,7 @@ QuicMic runs a tiny server on your computer and serves a web page to your phone.
 
 ## 🖼️ Screenshots
 
-![QuicMic web UI](assets/web-ui.png)
+![QuicMic web UI](https://raw.githubusercontent.com/Fix3dll/QuicMic/main/assets/web-ui.png)
 
 ---
 
@@ -225,7 +225,7 @@ QuicMic tries WebTransport first and transparently falls back to WebSocket when 
 
 QuicMic is designed to be lightweight — lock-free hot paths, no allocations per packet, and zero CPU while idle waiting on the network.
 
-![Process Explorer resource usage](assets/resource-usage.png)
+![Process Explorer resource usage](https://raw.githubusercontent.com/Fix3dll/QuicMic/main/assets/resource-usage.png)
 
 > Captured with Sysinternals **Process Explorer** while streaming, on an Intel Core i7-11800H running Windows 11 (25H2), started with `--no-update-check`.
 
@@ -264,6 +264,14 @@ Usually Wi-Fi congestion. Prefer a **5 GHz** network, move closer to the router,
 - State-changing API requests are rejected if their `Origin` doesn't match the server's own host (a same-origin guard against cross-site requests).
 - Only **one** client may stream at a time.
 - The TLS certificate is **self-signed, in-memory, and short-lived** (14 days), regenerated on each start. QuicMic is intended for use on a **trusted local network**, not the public internet.
+
+---
+
+## 🔄 Update check & privacy
+
+On startup, QuicMic makes a single best-effort check for a newer release. It opens one HTTPS request to `github.com` and reads only the redirect that `…/releases/latest` returns — just the `Location` header, so there is **no response body, no JSON, and no telemetry**. The only thing inherently shared is what any HTTPS request reveals to GitHub: your IP address. The check runs on a background task, never blocks startup, and stays silent on any failure.
+
+Opt out with `--no-update-check` or by setting `QUICMIC_NO_UPDATE_CHECK=1`.
 
 ---
 

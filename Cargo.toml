@@ -8,6 +8,20 @@ readme = "README.md"
 keywords = ["microphone", "audio", "webtransport", "streaming", "lan"]
 categories = ["multimedia::audio", "network-programming", "web-programming"]
 repository = "https://github.com/Fix3dll/QuicMic"
+# Keep the published crate lean: ship only what `cargo install` needs (src/ + the
+# embedded web/ assets + docs). Dev/release tooling, screenshots, AGENTS.md, and
+# the lockfile are excluded from the package.
+exclude = [
+    "assets/",
+    ".github/",
+    "AGENTS.md",
+    "Cargo.lock",
+    "dist-workspace.toml",
+    "about.toml",
+    "about.hbs",
+    "cliff.toml",
+    ".gitignore",
+]
 
 [dependencies]
 # Web framework & transport
