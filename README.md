@@ -275,7 +275,7 @@ cargo clippy --all-targets -- -D warnings # lints
 cargo test                                # unit + HTTP integration tests
 ```
 
-CI runs formatting on Linux and clippy + tests across **Linux, Windows, and macOS**. For a deep dive into the architecture, audio pipeline, and design guardrails, see [`AGENTS.md`](AGENTS.md).
+CI runs formatting on Linux and clippy + tests across **Linux, Windows, and macOS** (docs-only changes — markdown, images — skip CI). For a deep dive into the architecture, audio pipeline, and design guardrails, see [`AGENTS.md`](AGENTS.md).
 
 ---
 

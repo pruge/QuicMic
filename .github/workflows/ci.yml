@@ -3,11 +3,32 @@ name: CI
 on:
   push:
     branches: [ main ]
+    # Skip CI when ONLY non-build files change (docs, images, issue templates,
+    # gitignore). A mixed commit that also touches code still runs. `web/` is NOT
+    # ignored — it's embedded into the binary, so it stays covered.
+    paths-ignore:
+      - '**.md'
+      - 'assets/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/dependabot.yml'
+      - '.gitignore'
   pull_request:
     branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'assets/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/dependabot.yml'
+      - '.gitignore'
 
 permissions:
   contents: read
+
+# Cancel an in-progress run when a newer commit is pushed to the same ref, so
+# rapid successive pushes don't pile up redundant runs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   fmt:
