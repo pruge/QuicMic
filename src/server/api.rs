@@ -328,6 +328,64 @@ pub(super) async fn handle_update_settings(
     .into_response()
 }
 
+/// Why a client's audio went silent. Sent by the web UI so the terminal shows a
+/// cause instead of unexplained silence.
+#[derive(Deserialize)]
+pub(super) struct ClientStateRequest {
+    token: String,
+    reason: String,
+}
+
+/// POST /api/client-state — the client reports that it actually lost the microphone.
+///
+/// Only *real* microphone events reach this endpoint: the OS ended or muted the
+/// capture track. The page merely being **backgrounded is deliberately not reported**
+/// — it does not reliably mean capture stopped (audio often keeps flowing), so it
+/// must never raise an alarm on its own.
+///
+/// This matters because a lost microphone is otherwise indistinguishable from
+/// silence on the wire: the client-side noise gate legitimately sends nothing during
+/// silence, so the operator would just see unexplained quiet. Sent with `sendBeacon`
+/// if the page is already hidden, otherwise a normal fetch. Purely informational —
+/// this only logs.
+pub(super) async fn handle_client_state(
+    State(state): State<AppState>,
+    Json(body): Json<ClientStateRequest>,
+) -> StatusCode {
+    let authorized = {
+        let guard = state.stream.session_token.lock();
+        matches!(guard.as_ref(), Some(expected)
+            if super::constant_time_eq(expected.as_bytes(), body.token.as_bytes()))
+    };
+    if !authorized {
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    match body.reason.as_str() {
+        "mic_lost" => warn!(
+            "Client lost microphone access (taken by another app) — recovering; no audio until it succeeds"
+        ),
+        "mic_interrupted" => warn!(
+            "Client microphone interrupted (call or another app) — recovering; no audio until it succeeds"
+        ),
+        // Progress notes while an announced interruption is being worked on, so a slow
+        // recovery (typically after a phone call) narrates itself instead of leaving the
+        // operator staring at silence. Only sent once the warning above has gone out — a
+        // recovery that lands faster than that stays a single quiet line.
+        "recovery_resume" => info!("Client recovery: resuming the audio context"),
+        "recovery_reacquire" => info!("Client recovery: re-acquiring the microphone"),
+        "recovery_rebuild" => info!("Client recovery: rebuilding the audio graph"),
+        // Closes the episode in the log, so the operator sees the interruption *end*
+        // rather than the terminal just going quiet again. Worded to stand on its own,
+        // because a fast recovery beats the warning and arrives without one.
+        "audio_resumed" => info!("Client microphone recovered after an interruption"),
+        // Never echo an unrecognised, client-supplied string into the log.
+        _ => warn!("Client reported an unspecified audio interruption"),
+    }
+
+    StatusCode::NO_CONTENT
+}
+
 /// GET /ca — Download the CA certificate in DER format.
 pub(super) async fn handle_ca_download(State(state): State<AppState>) -> impl IntoResponse {
     let mut headers = HeaderMap::new();

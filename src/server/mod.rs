@@ -25,8 +25,8 @@ pub use state::{AppState, PairingThrottle, StreamState};
 pub use webtransport::run_webtransport_server;
 
 use api::{
-    handle_ca_download, handle_get_settings, handle_info, handle_pair, handle_renew, handle_stats,
-    handle_update_settings,
+    handle_ca_download, handle_client_state, handle_get_settings, handle_info, handle_pair,
+    handle_renew, handle_stats, handle_update_settings,
 };
 use assets::handle_static_assets;
 use websocket::handle_ws_upgrade;
@@ -66,6 +66,7 @@ pub fn build_router(state: AppState) -> Router {
             get(handle_get_settings).post(handle_update_settings),
         )
         .route("/api/stats", get(handle_stats))
+        .route("/api/client-state", post(handle_client_state))
         .route("/ws", get(handle_ws_upgrade))
         .route("/ca", get(handle_ca_download))
         .fallback(handle_static_assets)

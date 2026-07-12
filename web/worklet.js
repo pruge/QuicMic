@@ -39,6 +39,11 @@ const HEADER_BYTES = 4;
 const PACKET_BYTES = HEADER_BYTES + SAMPLES_PER_PACKET * 2;
 const HOLD_SECONDS = 0.25;         // keep the gate open this long after the last loud frame
 const SILENCE_LEVEL_EVERY = 5;     // while gated, emit a VU level update every Nth packet (~50ms)
+// While muted we skip all DSP, but still emit a sparse heartbeat (~1/s — the cadence
+// of the main thread's health tick that consumes it). Without this, muting posts
+// nothing at all and blinds the health check completely: a dead capture graph would
+// go unnoticed until the user unmuted and found silence.
+const MUTED_HEARTBEAT_EVERY = 100;
 
 class MicProcessor extends AudioWorkletProcessor {
     constructor() {
@@ -57,6 +62,7 @@ class MicProcessor extends AudioWorkletProcessor {
         this.prevFrame = null;
         this.prevLevel = 0;
         this.muted = false;
+        this.mutedTicks = 0; // heartbeat counter while muted (see MUTED_HEARTBEAT_EVERY)
         this.gain = 1; // linear output gain, applied before Int16 conversion
 
         this.port.onmessage = (e) => {
@@ -89,7 +95,16 @@ class MicProcessor extends AudioWorkletProcessor {
 
             if (this.writePos >= SAMPLES_PER_PACKET) {
                 this.writePos = 0;
-                if (this.muted) continue; // Muted: no convert / gate / post.
+                if (this.muted) {
+                    // Muted: skip all DSP (that is the whole point), but keep a sparse
+                    // heartbeat so the main thread can still tell "alive but muted"
+                    // apart from "the capture graph has died".
+                    if (++this.mutedTicks >= MUTED_HEARTBEAT_EVERY) {
+                        this.mutedTicks = 0;
+                        this.port.postMessage({ level: 0 });
+                    }
+                    continue;
+                }
 
                 // Build the full wire frame: a leading HEADER_BYTES gap (filled with
                 // the sequence number on the main thread) followed by the PCM, so the

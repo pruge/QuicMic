@@ -31,6 +31,7 @@ let ws = null;               // WebSocket instance (active, fallback)
 let datagramWriter = null;
 let audioContext = null;
 let micStream = null;
+let micSource = null;        // MediaStreamSource feeding the worklet (rebuilt on mic recovery).
 let workletNode = null;
 let sequenceNumber = 0;
 let isStreaming = false;     // The user intends to stream (mic is active).
@@ -50,12 +51,29 @@ let voiceTimeout = null;     // Debounce for the voice-activity glow on the mic 
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 
+// The worklet posts a level update roughly every 50ms even while the noise gate is
+// closed, so a multi-second gap means the capture graph has genuinely stopped — which
+// is NOT the same thing as silence. Checked on the existing 1s stats tick, so it costs
+// no timer of its own.
+const AUDIO_STALL_MS = 4000;
+// A momentary interruption (a notification chime, a quick app switch) usually heals by
+// itself. Give it this long before we touch the microphone at all.
+const UNHEALTHY_GRACE_MS = 5000;
+// Hold the server-side warning this long: if recovery lands first, the operator gets a
+// single "recovered" line instead of a WARN and its INFO milliseconds apart.
+const INTERRUPTION_WARN_DELAY_MS = 700;
+
 // Stats
 let packetsSent = 0;
 let startTime = 0;
 let healthCheckTicks = 0;
 let ecoHealthTicks = 0;     // Eco Mode low-frequency liveness counter.
-let lastAudioOk = true;     // Last known audio-output-device health (from /api/stats).
+let lastAudioOk = true;      // Last known audio-output-device health (from /api/stats).
+let lastAudioFrameAt = 0;    // Last worklet message — ground truth that the graph is alive.
+let audioFrameWaiter = null; // Resolver used to verify a recovery rung actually worked.
+let audioRecovering = false; // Guards against overlapping recovery attempts.
+let interruptionNotified = false; // One server warn per interruption episode (no spam).
+let unhealthySince = 0;      // When the health check first saw trouble (grace period).
 
 // ── DOM References ────────────────────────────────────────────────────
 const pairScreen = document.getElementById('pair-screen');
@@ -275,18 +293,50 @@ async function init() {
         }
     }
 
-    // Resume audio and re-check connectivity when the page returns to the
-    // foreground (iOS Safari suspends timers and sockets while backgrounded).
+    // Returning to the foreground is the one moment we may safely try to restore
+    // capture (see the microphone-recovery section). Going *hidden* is deliberately
+    // NOT treated as an event: the page being backgrounded does not reliably mean
+    // the microphone was lost — often audio keeps flowing — so it must never raise
+    // an alarm on its own. Only the OS's actual mic events do that.
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState !== 'visible') return;
-        if (audioContext && audioContext.state === 'suspended') {
-            audioContext.resume().catch(console.error);
-        }
-        // Screen Wake Locks are auto-released when the page is hidden; re-acquire.
-        if (isPowerSaveActive && !wakeLock) acquireWakeLock();
-        // Detect a server that went away while we were suspended.
-        if (isStreaming && !isReconnecting) fetchServerStats();
+        if (document.visibilityState === 'visible') onPageVisible();
     });
+}
+
+/**
+ * Back in the foreground: make exactly ONE attempt to bring the capture graph back.
+ * If it fails, stop cleanly rather than leaving the user in a "connected but
+ * silent" limbo.
+ */
+async function onPageVisible() {
+    // Screen Wake Locks are auto-released when the page is hidden; re-acquire.
+    if (isPowerSaveActive && !wakeLock) acquireWakeLock();
+    if (!isStreaming) return;
+
+    // While we were hidden the OS may have taken the microphone — and JS was frozen, so
+    // no event could reach us OR the server. This is the first moment we can look, and
+    // the first moment we can TELL anyone. So route through handleAudioInterruption:
+    // recovering *silently* here is exactly what left the terminal blind while the user
+    // sat waiting, wondering what was happening.
+    //
+    // Check the flags first (cheap), then verify ACTUAL flow. The timestamp from before
+    // the freeze proves nothing — and resetting it here (as an earlier version did) is
+    // worse than useless: it masks a zombie graph, which passes every flag check. The
+    // only honest question is "is the worklet posting right now?".
+    const track = micStream && micStream.getAudioTracks()[0];
+    const flagsOk = !!track && track.readyState === 'live' && !track.muted
+        && !!audioContext && audioContext.state === 'running';
+
+    // Returning to the page is an explicit signal the user is done with whatever took
+    // the mic, so this is the one place we reclaim it even from an OS-muted track.
+    // 1500ms, because a muted worklet only heartbeats about once a second.
+    if (!flagsOk || !(await waitForAudioFrame(1500))) {
+        await handleAudioInterruption('mic_interrupted');
+        return;
+    }
+
+    // Detect a server that went away while we were suspended.
+    if (!isReconnecting) fetchServerStats();
 }
 
 async function renewSessionToken() {
@@ -648,53 +698,9 @@ async function startStreaming() {
             }
         }
 
-        // Request microphone access (must be triggered by a user gesture).
-        micStream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                channelCount: 1,
-                echoCancellation: false,
-                noiseSuppression: false,
-                autoGainControl: false,
-            },
-        });
-
-        // Setup AudioContext + Worklet with the lowest-latency hint.
-        audioContext = new AudioContext({ latencyHint: 'interactive' });
-
-        try {
-            // No cache-buster needed: the server sends `Cache-Control: no-cache`
-            // + ETag, so the browser revalidates and picks up an edited worklet on
-            // the next stream start (consistent with how app.js is served).
-            await audioContext.audioWorklet.addModule('worklet.js');
-        } catch (e) {
-            throw new Error('Audio processor failed to load. Check browser compatibility.');
-        }
-
-        const source = audioContext.createMediaStreamSource(micStream);
-        workletNode = new AudioWorkletNode(audioContext, 'mic-processor');
-
-        // The worklet applies the noise gate on the audio thread and only emits
-        // packets that pass it (plus a throttled VU level while gated), so the
-        // radio stays idle during silence. Each `frame` is the full wire packet
-        // (header gap + PCM); we just stamp the sequence number and send it.
-        workletNode.port.onmessage = (event) => {
-            if (isMuted) return; // Muted: nothing to send; meter stays at 0.
-            const d = event.data;
-            updateVu(d.level);
-            if (d.frame) {
-                // Voice passing (gate open): glow the mic ring; clears after a
-                // short gap of silence.
-                micRing.classList.add('voice');
-                clearTimeout(voiceTimeout);
-                voiceTimeout = setTimeout(() => micRing.classList.remove('voice'), 200);
-                sendAudioPacket(d.frame);
-            }
-        };
-        sendGateToWorklet(); // push the current gate threshold to the worklet
-        sendGainToWorklet(); // and the current output gain
-
-        source.connect(workletNode);
-        // Don't connect to destination — we don't want local playback.
+        // Build the whole capture graph. Extracted so the recovery ladder can rebuild
+        // it from scratch when it turns out to be a zombie (see setupAudioGraph).
+        await setupAudioGraph();
 
         // Mark streaming intent BEFORE connecting so the close handler treats
         // any subsequent drop as a real disconnect (not initial-connect noise).
@@ -752,18 +758,10 @@ function stopStreaming() {
     teardownTransport();
 
     // Stop audio
-    if (workletNode) {
-        workletNode.disconnect();
-        workletNode = null;
-    }
-    if (audioContext) {
-        audioContext.close();
-        audioContext = null;
-    }
-    if (micStream) {
-        micStream.getTracks().forEach((t) => t.stop());
-        micStream = null;
-    }
+    teardownAudioGraph();
+    interruptionNotified = false;
+    unhealthySince = 0;
+    lastAudioFrameAt = 0;
 
     // Update UI
     micBtn.classList.remove('active');
@@ -780,6 +778,385 @@ function stopStreaming() {
         togglePowerSave();
     }
     vuBar.style.width = '0%';
+}
+
+// ── Microphone Interruption & Recovery ────────────────────────────────
+//
+// The OS — not us — owns the microphone. An incoming call, another app grabbing
+// it, or the page being backgrounded all kill capture, and the browser does not
+// hand it back on its own. A dead capture graph is invisible on the wire: the
+// client-side noise gate legitimately sends nothing during silence, so "no
+// packets" is NOT evidence of a fault. Hence everything below keys off the OS's
+// own events — no polling, no timers, no retry loops.
+//
+// Guardrail: we only ever ASK for the microphone again while the page is in the
+// foreground (or on an explicit user tap). We never re-request it in the
+// background, so another app is never fought for the mic.
+
+/** Subscribe to the OS's microphone-track lifecycle events. */
+function attachMicTrackHandlers() {
+    const track = micStream && micStream.getAudioTracks()[0];
+    if (!track) return;
+
+    // Permanently revoked (another app took it). Only a fresh getUserMedia can
+    // recover, and only with the page in the foreground.
+    // Permanently revoked (another app took it). Nothing brings it back on its own, so
+    // escalate straight away.
+    track.onended = () => {
+        console.warn('[audio] microphone track ended (taken by another app)');
+        handleAudioInterruption('mic_lost');
+    };
+
+    // Temporary OS interruption (e.g. an incoming call). Diagnostic only:
+    // `checkAudioHealth` is the single decision point, and it deliberately WAITS on an
+    // OS-muted track rather than fighting the call for the microphone.
+    track.onmute = () => console.warn('[audio] microphone muted by the OS (interruption)');
+
+    track.onunmute = async () => {
+        console.log('[audio] microphone unmuted by the OS');
+        if (!isStreaming) return;
+        // The OS handed the microphone back, so resuming *our own* context takes nothing
+        // from anyone — do it even while backgrounded. Gating this on `visible` (as an
+        // earlier version did) is why audio used to stay dead after a call until the user
+        // reopened the page: the mic was already back, we just never un-parked the
+        // context. Re-acquiring (getUserMedia) is the thing that must stay foreground-only.
+        if (audioContext && audioContext.state !== 'running') {
+            try { await audioContext.resume(); } catch (e) { /* may need a user gesture */ }
+        }
+    };
+}
+
+/** The mic constraints, shared by the initial setup and the recovery ladder. */
+const MIC_CONSTRAINTS = {
+    audio: {
+        channelCount: 1,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+    },
+};
+
+/**
+ * Build the capture graph from scratch: getUserMedia -> AudioContext -> worklet.
+ * `startStreaming` and the ladder's full-rebuild rung share this, so a rebuilt graph is
+ * identical to a freshly started one — including re-pushing gate/gain/mute into the new
+ * worklet, which would otherwise come up at its defaults.
+ */
+async function setupAudioGraph() {
+    micStream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
+
+    audioContext = new AudioContext({ latencyHint: 'interactive' });
+    // Diagnostic only. We deliberately do NOT recover from here: state changes fire in
+    // bursts (running -> suspended -> interrupted), and acting on each one spammed the
+    // server with duplicate warnings. `checkAudioHealth` is the single decision point.
+    audioContext.onstatechange = () =>
+        console.warn('[audio] AudioContext state ->', audioContext && audioContext.state);
+
+    try {
+        // No cache-buster needed: the server sends `Cache-Control: no-cache` + ETag, so
+        // the browser revalidates and picks up an edited worklet on the next start.
+        await audioContext.audioWorklet.addModule('worklet.js');
+    } catch (e) {
+        throw new Error('Audio processor failed to load. Check browser compatibility.');
+    }
+
+    attachMicTrackHandlers();
+
+    micSource = audioContext.createMediaStreamSource(micStream);
+    workletNode = new AudioWorkletNode(audioContext, 'mic-processor');
+
+    workletNode.port.onmessage = (event) => {
+        // GROUND TRUTH that the graph is pumping: the worklet posts a level update even
+        // while the gate is closed, and a heartbeat even while muted. This timestamp is
+        // the only thing that can tell "silent" apart from "dead" — the state flags
+        // cannot, and trusting them is what produced "Reconnected!" over silence.
+        lastAudioFrameAt = Date.now();
+        if (audioFrameWaiter) {
+            const resolve = audioFrameWaiter;
+            audioFrameWaiter = null;
+            resolve(true);
+        }
+        if (isMuted) return; // Muted: nothing to send; meter stays at 0.
+        const d = event.data;
+        updateVu(d.level);
+        if (d.frame) {
+            micRing.classList.add('voice');
+            clearTimeout(voiceTimeout);
+            voiceTimeout = setTimeout(() => micRing.classList.remove('voice'), 200);
+            sendAudioPacket(d.frame);
+        }
+    };
+
+    // A fresh worklet starts at its defaults, so re-push the live settings.
+    sendGateToWorklet();
+    sendGainToWorklet();
+    sendMuteToWorklet();
+
+    micSource.connect(workletNode);
+    // Don't connect to destination — we don't want local playback.
+    lastAudioFrameAt = Date.now();
+}
+
+/** Release every audio object. No UI changes — the caller decides what to show. */
+function teardownAudioGraph() {
+    if (micSource) {
+        micSource.disconnect();
+        micSource = null;
+    }
+    if (workletNode) {
+        workletNode.disconnect();
+        workletNode = null;
+    }
+    if (audioContext) {
+        audioContext.onstatechange = null;
+        audioContext.close().catch(() => { /* already closing */ });
+        audioContext = null;
+    }
+    if (micStream) {
+        micStream.getTracks().forEach((t) => t.stop());
+        micStream = null;
+    }
+}
+
+/** Is the graph actually pumping? The one signal that cannot lie. */
+function isAudioFlowing() {
+    return lastAudioFrameAt > 0 && Date.now() - lastAudioFrameAt < AUDIO_STALL_MS;
+}
+
+/**
+ * Full health = the graph is pumping AND the OS is really giving us signal. BOTH terms
+ * are required, because each catches exactly what the other misses:
+ *   - flow alone is not enough: an OS-muted track still pumps (silence)
+ *   - flags alone are not enough: a zombie graph reports 'live' + 'running' while dead
+ */
+function isAudioHealthy() {
+    const track = micStream && micStream.getAudioTracks()[0];
+    return isAudioFlowing()
+        && !!track && track.readyState === 'live' && !track.muted
+        && !!audioContext && audioContext.state === 'running';
+}
+
+/** Resolves as soon as the worklet posts again — the only proof a recovery rung worked. */
+function waitForAudioFrame(timeoutMs = 800) {
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+            audioFrameWaiter = null;
+            resolve(false);
+        }, timeoutMs);
+        audioFrameWaiter = (ok) => {
+            clearTimeout(timer);
+            resolve(ok);
+        };
+    });
+}
+
+/**
+ * Escalating recovery ladder — one pass, foreground only, never in the background.
+ * Every rung is verified by the worklet actually posting again; the state flags are
+ * never allowed to declare success, because that is precisely how a zombie graph
+ * slipped through before.
+ */
+async function recoverAudio() {
+    if (document.visibilityState !== 'visible') return false;
+
+    // An unmuted worklet posts every ~50ms; a muted one only heartbeats about once a
+    // second. Spending the muted budget on every rung is what made recovery take
+    // seconds after a phone call.
+    const verifyMs = isMuted ? 1500 : 400;
+
+    // A rung only counts as verified when the worklet posts again AND the OS is really
+    // giving us signal. Flow alone is not proof: a still-muted track happily pumps
+    // silence through the graph, which would let a rung declare victory over no audio.
+    const verified = async () => (await waitForAudioFrame(verifyMs)) && isAudioHealthy();
+
+    // Narrate each rung to the operator's terminal — but only once the interruption has
+    // actually been announced. A recovery that lands before the warning fires stays a
+    // single quiet line, instead of a burst of progress notes about a problem nobody saw.
+    const rung = (label, reason) => {
+        console.log(`[audio] ${label}`);
+        if (interruptionNotified) notifyServerState(reason);
+    };
+
+    const track = micStream && micStream.getAudioTracks()[0];
+    const trackDead = !track || track.readyState !== 'live';
+
+    // 1. A suspended/interrupted context just needs a resume (cheapest rung) — but only
+    //    if the source is still alive. Resuming a context whose track is dead cannot
+    //    produce anything, so skip the wasted wait and go straight to re-acquiring.
+    if (!trackDead && audioContext && audioContext.state !== 'running') {
+        rung('recovery 1/3: resume context', 'recovery_resume');
+        try { await audioContext.resume(); } catch (e) { /* may need a user gesture */ }
+        if (await verified()) return true;
+    }
+
+    // 2. The track is dead or the OS still holds it: get a fresh one and re-wire it into
+    //    the existing worklet.
+    rung('recovery 2/3: re-acquire microphone', 'recovery_reacquire');
+    try {
+        if (micStream) micStream.getTracks().forEach((t) => t.stop());
+        micStream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
+        attachMicTrackHandlers();
+        if (micSource) micSource.disconnect();
+        micSource = audioContext.createMediaStreamSource(micStream);
+        micSource.connect(workletNode);
+        if (await verified()) return true;
+    } catch (e) {
+        console.warn('[audio] re-acquire failed:', e);
+    }
+
+    // 3. The context/worklet is itself a zombie — the usual outcome after a long freeze:
+    //    every flag reads healthy, yet nothing is ever pumped. Only a full rebuild fixes
+    //    it, and this rung is what the old code was missing.
+    rung('recovery 3/3: full graph rebuild', 'recovery_rebuild');
+    try {
+        teardownAudioGraph();
+        await setupAudioGraph();
+        if (await verified()) return true;
+    } catch (e) {
+        console.warn('[audio] rebuild failed:', e);
+    }
+
+    return false;
+}
+
+/**
+ * Something stopped capture. Warn the server ONCE per episode, then run the ladder
+ * (foreground only) and stop cleanly if every rung fails.
+ */
+async function handleAudioInterruption(reason) {
+    if (!isStreaming || audioRecovering) return;
+    audioRecovering = true;
+    let warnTimer = null;
+    try {
+        // Don't cry wolf. A recovery that lands in a few hundred ms would otherwise log
+        // its WARN and the "recovered" INFO back-to-back, milliseconds apart — noise the
+        // operator can do nothing with. So hold the warning briefly: if the interruption
+        // actually drags on (a phone call, a zombie graph needing a full rebuild), it
+        // goes out, and they learn why the audio stopped and that we are on it.
+        // Several detectors can fire for one interruption, so this is also the single
+        // dedupe point — without it each of them sent its own WARN.
+        // Backgrounded. Capture keeps running in the background as long as nothing else
+        // takes the microphone — so getting here means something really did take it.
+        // We will NOT try to reclaim it (that would fight whatever app is using it), and
+        // since no recovery can therefore "beat" the warning, send it straight away.
+        // (Deferring it here was a bug: the `finally` cleanup cancelled the timer on this
+        // very path, so a mic lost in the background was never reported at all.)
+        if (document.visibilityState !== 'visible') {
+            if (!interruptionNotified) {
+                interruptionNotified = true;
+                notifyServerState(reason);
+            }
+            return;
+        }
+
+        if (!interruptionNotified) {
+            warnTimer = setTimeout(() => {
+                warnTimer = null;
+                interruptionNotified = true;
+                notifyServerState(reason);
+            }, INTERRUPTION_WARN_DELAY_MS);
+        }
+
+        const recovered = await recoverAudio();
+        if (warnTimer) {
+            clearTimeout(warnTimer);
+            warnTimer = null;
+        }
+
+        if (recovered) {
+            console.log('[audio] recovered');
+            // Close the episode in the operator's log, so the terminal shows the
+            // interruption *ending* instead of just going quiet again. Standalone when
+            // the recovery beat the warning; the closing half of the pair when it didn't.
+            notifyServerState('audio_resumed');
+            interruptionNotified = false;
+            unhealthySince = 0;
+            return;
+        }
+
+        // Failed outright: the operator must hear about it even if the delay hadn't run.
+        if (!interruptionNotified) {
+            interruptionNotified = true;
+            notifyServerState(reason);
+        }
+        if (isStreaming) stopForAudioLoss('Microphone was interrupted — streaming stopped.');
+    } finally {
+        if (warnTimer) clearTimeout(warnTimer);
+        audioRecovering = false;
+    }
+}
+
+/**
+ * The single health decision point, on the 1s tick that already exists — no new timer.
+ *
+ * An OS-muted track is handled specially: it means a call or another app currently owns
+ * the microphone, and the OS gives it back via `onunmute` however long that takes. We
+ * WAIT instead of reclaiming it — recovering here would mean fighting an active phone
+ * call for the mic. Everything else gets a short grace period (so a momentary blip heals
+ * itself untouched) and then the ladder.
+ */
+function checkAudioHealth() {
+    // Runs while backgrounded too. Capture keeps working in the background as long as
+    // nothing else takes the microphone, so trouble seen here is real and worth
+    // reporting — and reporting is all that happens while hidden, because
+    // handleAudioInterruption is the one that refuses to *reclaim* the mic there.
+    if (!isStreaming || isReconnecting || audioRecovering) return;
+
+    const track = micStream && micStream.getAudioTracks()[0];
+    if (track && track.readyState === 'live' && track.muted) {
+        if (!interruptionNotified) {
+            interruptionNotified = true;
+            notifyServerState('mic_interrupted');
+        }
+        return; // the OS owns it; wait for onunmute rather than fight for it
+    }
+
+    if (isAudioHealthy()) {
+        unhealthySince = 0;
+        // Close the episode. This is the path that fires when the OS simply hands the mic
+        // back on its own (a call ending) — no rung of the ladder runs, so without this
+        // the terminal showed the interruption but never its end.
+        if (interruptionNotified) {
+            interruptionNotified = false;
+            notifyServerState('audio_resumed');
+        }
+        return;
+    }
+    if (unhealthySince === 0) {
+        unhealthySince = Date.now();
+        return; // give it a chance to fix itself before we touch anything
+    }
+    if (Date.now() - unhealthySince < UNHEALTHY_GRACE_MS) return;
+
+    console.warn('[audio] unhealthy past the grace period — running recovery');
+    unhealthySince = 0;
+    handleAudioInterruption('mic_interrupted');
+}
+
+/** Stop cleanly with an honest message, instead of a "connected but silent" limbo. */
+function stopForAudioLoss(reason) {
+    stopStreaming();
+    showToast(reason);
+}
+
+/**
+ * Best-effort note to the server explaining why the audio went quiet, so the
+ * terminal shows a cause instead of unexplained silence. While the page is being
+ * backgrounded we use `sendBeacon` (the browser flushes it even as JS freezes); in
+ * the foreground a normal fetch is fully reliable.
+ */
+function notifyServerState(reason) {
+    if (!sessionToken) return;
+    const payload = JSON.stringify({ token: sessionToken, reason });
+    if (document.visibilityState === 'hidden' && navigator.sendBeacon) {
+        navigator.sendBeacon('/api/client-state', new Blob([payload], { type: 'application/json' }));
+        return;
+    }
+    fetchWithTimeout('/api/client-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+    }).catch(() => { /* best-effort; never surfaced to the user */ });
 }
 
 /** Close and discard the active transport objects without touching audio. */
@@ -986,6 +1363,17 @@ async function reconnectLoop() {
             }
             await connectTransport();
 
+            // The transport being back says nothing about the microphone: an OS
+            // interruption can leave capture dead, in which case we would be
+            // "connected" but permanently silent. Verify before claiming success —
+            // never toast "Reconnected!" over a dead mic. Route through
+            // handleAudioInterruption so the server is TOLD, rather than recovering
+            // silently and leaving the terminal none the wiser.
+            if (!isAudioHealthy()) {
+                await handleAudioInterruption('mic_interrupted');
+                if (!isStreaming) return; // every rung failed; it stopped us cleanly
+            }
+
             // Reconnected successfully.
             reconnectAttempts = 0;
             isReconnecting = false;
@@ -1071,6 +1459,10 @@ function setConnected(connected) {
 }
 
 function updateStats() {
+    // The single audio-health decision point. Rides on this existing tick, so it costs
+    // no extra timer — and it now runs even while muted, because the worklet heartbeats.
+    checkAudioHealth();
+
     // Eco Mode: suspend the full stats UI/polling to save power, but keep a
     // low-frequency liveness check (~every 3s) so a server shutdown is still
     // detected behind the black overlay. On iOS Safari the WebTransport close

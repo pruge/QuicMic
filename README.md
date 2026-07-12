@@ -149,6 +149,14 @@ On **iOS 18**, WebTransport is behind a feature flag and must be turned on once:
 
 Without it, QuicMic automatically falls back to the WebSocket transport (slightly higher latency). Newer iOS versions enable WebTransport by default.
 
+### 🎤 Interruptions (calls, other apps)
+
+An incoming call or another app can take the microphone away from the browser. Backgrounding the browser by itself is fine — QuicMic keeps streaming as long as nothing else grabs the mic.
+
+QuicMic won't pretend to still be streaming: brief interruptions usually resolve themselves, and if the microphone is really gone it stops cleanly and says so — just tap the mic button again. It never re-grabs the microphone in the background, so it won't disrupt the app you're using.
+
+> To keep streaming with the screen dark, use 🔋 **Eco Mode** (it holds a screen wake lock).
+
 ---
 
 ## 🛠️ Command-line options
