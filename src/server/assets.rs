@@ -193,4 +193,97 @@ mod embed_tests {
             "vendored Tabler LICENSE must ship inside the binary"
         );
     }
+
+    /// Parse a PNG's IHDR chunk for its real pixel dimensions (width at bytes
+    /// 16..20, height at 20..24, both big-endian). Fails on anything that is
+    /// not a well-formed PNG header, so it doubles as a magic-number check.
+    fn png_dimensions(bytes: &[u8]) -> (u32, u32) {
+        const MAGIC: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        assert!(bytes.len() >= 24, "PNG too short for IHDR");
+        assert_eq!(&bytes[..8], &MAGIC, "not a PNG file");
+        let w = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+        let h = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+        (w, h)
+    }
+
+    /// The web app must be installable: index.html declares the manifest, and
+    /// the manifest carries everything Chrome's install criteria require
+    /// (name/short_name, start_url, standalone display, and an icon of at
+    /// least 192x192 with the "any" purpose). T03.
+    #[test]
+    fn web_app_install_declaration_is_complete() {
+        let index = Asset::get("index.html").expect("index.html embedded");
+        let index = std::str::from_utf8(&index.data).unwrap();
+        assert!(
+            index.contains("rel=\"manifest\""),
+            "index.html must link the manifest — without it no browser offers install"
+        );
+
+        let manifest = Asset::get("manifest.json").expect("manifest.json embedded");
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&manifest.data).expect("manifest.json must be valid JSON");
+
+        assert_eq!(manifest["name"], "QuicMic", "name must match <title>");
+        assert_eq!(manifest["short_name"], "QuicMic");
+        assert_eq!(manifest["display"], "standalone");
+        assert!(
+            manifest["start_url"].is_string(),
+            "start_url required for install"
+        );
+
+        // theme_color/background_color must not drift from index.html's meta.
+        assert_eq!(manifest["theme_color"], "#0a0a0f");
+        assert_eq!(manifest["background_color"], "#0a0a0f");
+        assert!(
+            index.contains("name=\"theme-color\" content=\"#0a0a0f\""),
+            "meta theme-color must stay in sync with the manifest"
+        );
+
+        // Icons: every referenced icon must actually exist as an embedded asset
+        // with the REAL declared pixel size, and install needs ≥192 "any".
+        let icons = manifest["icons"].as_array().expect("icons array");
+        assert!(!icons.is_empty(), "at least one icon is required");
+        let mut has_any_192 = false;
+        for icon in icons {
+            let src = icon["src"].as_str().expect("icon src");
+            let sizes = icon["sizes"].as_str().expect("icon sizes");
+            let purpose = icon["purpose"].as_str().unwrap_or("any");
+            let data = Asset::get(src).unwrap_or_else(|| panic!("icon {src} missing from web/"));
+            let (w, h) = png_dimensions(&data.data);
+            let declared = sizes
+                .split('x')
+                .map(|v| v.parse::<u32>().unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                (w, h),
+                (declared[0], declared[1]),
+                "icon {src} actual {w}x{h} != declared {sizes}"
+            );
+            if purpose.split_whitespace().any(|p| p == "any") && w >= 192 && h >= 192 {
+                has_any_192 = true;
+            }
+        }
+        assert!(
+            has_any_192,
+            "install requires an any-purpose icon of at least 192x192"
+        );
+    }
+
+    /// The service worker only has to EXIST with a fetch handler to satisfy
+    /// the install criterion; this pins the files that make that true.
+    #[test]
+    fn service_worker_and_icons_are_embedded() {
+        for path in ["sw.js", "icons/icon-192.png", "icons/icon-512.png"] {
+            assert!(
+                Asset::get(path).is_some(),
+                "{path} must be embedded in the binary"
+            );
+        }
+        let sw = Asset::get("sw.js").unwrap();
+        let sw = std::str::from_utf8(&sw.data).unwrap();
+        assert!(
+            sw.contains("addEventListener('fetch'") || sw.contains("addEventListener(\"fetch\""),
+            "service worker must register a fetch handler (install criterion)"
+        );
+    }
 }
