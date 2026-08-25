@@ -298,3 +298,5 @@ CI runs formatting on Linux and clippy + tests across **Linux, Windows, and macO
 ## 📄 License
 
 Licensed under the **GNU General Public License v3.0 or later** — see [`LICENSE.md`](LICENSE.md).
+
+The macOS menu-bar icon and web UI iconography use the **microphone** icon from [Tabler Icons](https://github.com/tabler/tabler-icons) (MIT License, © Paweł Kuna), vendored unmodified at [`web/vendor/tabler/`](web/vendor/tabler/) together with its license text; the file is embedded into every distributed binary via `rust-embed`.

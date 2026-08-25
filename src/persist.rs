@@ -159,16 +159,40 @@ fn save_to(path: &Path, state: &PersistedState) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Persist a new pairing PIN to the real state file (read-modify-write of just
+/// the pin field, so a rotation preserves cert / IP / token). Used by the macOS
+/// menubar's "New PIN" action. Best-effort: failures are logged, never fatal.
+pub fn update_pin(pin: &str) {
+    match state_file_path() {
+        Ok(path) => {
+            if let Err(e) = update_field_in(&path, "pin", serde_json::Value::String(pin.into())) {
+                warn!(error = %e, "Could not persist new pairing PIN to disk");
+            }
+        }
+        Err(e) => warn!(error = %e, "No persistent-state location available; PIN not saved"),
+    }
+}
+
 /// Patch only the token field of an existing state file, keeping every other
 /// field byte-for-byte as stored. `None` clears it.
 fn update_token_in(path: &Path, token: Option<&str>) -> anyhow::Result<()> {
-    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
-    value["token"] = match token {
-        Some(t) => serde_json::Value::String(t.to_string()),
-        None => serde_json::Value::Null,
-    };
+    update_field_in(
+        path,
+        "token",
+        match token {
+            Some(t) => serde_json::Value::String(t.to_string()),
+            None => serde_json::Value::Null,
+        },
+    )
+}
+
+/// Patch a single top-level field of the state document, keeping every other
+/// field byte-for-byte as stored.
+fn update_field_in(path: &Path, field: &str, value: serde_json::Value) -> anyhow::Result<()> {
+    let mut value_doc: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
+    value_doc[field] = value;
     let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, serde_json::to_vec_pretty(&value)?)?;
+    fs::write(&tmp, serde_json::to_vec_pretty(&value_doc)?)?;
     restrict_permissions(&tmp);
     fs::rename(&tmp, path)?;
     Ok(())
@@ -312,6 +336,27 @@ mod tests {
         // Clearing works too.
         update_token_in(&path, None).unwrap();
         assert!(load_from(&path).unwrap().unwrap().token.is_none());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_pin_patches_only_pin_field() {
+        let dir = temp_dir("pin-patch");
+        let path = dir.join("state.json");
+        let mut state = sample_state("111222", "192.168.0.7");
+        state.token = Some("keep-token".to_string());
+        save_to(&path, &state).unwrap();
+
+        update_field_in(&path, "pin", serde_json::Value::String("999888".into())).unwrap();
+
+        let loaded = load_from(&path).unwrap().unwrap();
+        assert_eq!(loaded.pin, "999888");
+        // Everything else survived untouched.
+        assert_eq!(loaded.token.as_deref(), Some("keep-token"));
+        assert_eq!(loaded.lan_ip, "192.168.0.7");
+        assert_eq!(loaded.cert_pem, state.cert_pem);
+        assert_eq!(loaded.key_pem, state.key_pem);
 
         let _ = fs::remove_dir_all(&dir);
     }

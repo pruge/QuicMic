@@ -177,3 +177,20 @@ fn not_modified(etag: &str) -> Response {
     )
         .into_response()
 }
+
+#[cfg(test)]
+mod embed_tests {
+    use super::Asset;
+
+    #[test]
+    fn vendored_tabler_assets_are_embedded() {
+        assert!(
+            Asset::get("vendor/tabler/microphone.svg").is_some(),
+            "vendored Tabler microphone SVG must be embedded in the binary"
+        );
+        assert!(
+            Asset::get("vendor/tabler/LICENSE").is_some(),
+            "vendored Tabler LICENSE must ship inside the binary"
+        );
+    }
+}
