@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::audio::RingBuffer;
+use crate::persist::TokenStore;
 use crate::tls::TlsIdentity;
 
 /// State shared between both transport handlers and the HTTP API.
@@ -118,6 +119,10 @@ pub struct AppState {
     pub wt_port: u16,
     pub lan_ip: String,
     pub pairing_throttle: Arc<parking_lot::Mutex<PairingThrottle>>,
+    /// Handle for persisting session-token rotations (`/api/pair`, `/api/renew`)
+    /// so an already-paired phone survives a server restart. Disabled (no-op) in
+    /// tests, so fixtures never touch the real on-disk store.
+    pub persist: TokenStore,
     /// Latest newer release tag found by the startup update check, if any. Read by
     /// `/api/info` so the web UI can show a small "update available" banner.
     pub update_status: Arc<parking_lot::Mutex<Option<String>>>,

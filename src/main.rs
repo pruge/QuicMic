@@ -1,4 +1,5 @@
 mod audio;
+mod persist;
 mod server;
 mod tls;
 mod update_check;
@@ -8,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use clap::Parser;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 /// Ring-buffer depth, sized at a nominal 48 kHz (the rate browsers capture at).
@@ -62,6 +63,8 @@ struct Cli {
     ip: Option<String>,
 
     /// Set a custom 6-digit pairing PIN (auto-generated if omitted).
+    /// An explicitly given PIN wins over the persisted one and becomes the new
+    /// persisted value.
     #[arg(long)]
     pin: Option<String>,
 
@@ -153,10 +156,18 @@ async fn run() -> anyhow::Result<()> {
     // ── Create shared ring buffer ───────────────────────────────────────
     let ring = Arc::new(audio::RingBuffer::new(RING_BUFFER_SAMPLES));
 
+    // ── Persistent state (TLS identity, PIN, session token) ───────────
+    // Loaded once up front so all three values can be seeded from disk. A missing
+    // or corrupt file simply means "first run" — everything regenerates.
+    let persisted = persist::load();
+
     // ── Shared atomics ──────────────────────────────────────────────────
     let is_connected = Arc::new(AtomicBool::new(false));
-    let session_token: Arc<parking_lot::Mutex<Option<String>>> =
-        Arc::new(parking_lot::Mutex::new(None));
+    // Seed with the previously issued token (if any) so an already-paired phone
+    // keeps working across a server restart without re-entering the PIN.
+    let session_token: Arc<parking_lot::Mutex<Option<String>>> = Arc::new(parking_lot::Mutex::new(
+        persisted.as_ref().and_then(|s| s.token.clone()),
+    ));
     // --noise-gate is given in dB (-100 = Off) to match the web UI slider; convert
     // it to the linear amplitude the audio thread and HTTP API use. The linear
     // clamp is kept as a final safety net.
@@ -191,18 +202,52 @@ async fn run() -> anyhow::Result<()> {
     )?;
 
     // ── Generate TLS identity ───────────────────────────────────────────
-    let (wt_identity, identity) = tls::generate_identity(lan_ip, cli.dump_certs)?;
+    // ── TLS identity: reuse the persisted one while it still fits ─────
+    // The SANs are baked in at generation time, so a stored certificate matches
+    // only while the LAN IP is unchanged; if the machine's address changed, the
+    // cert must be regenerated or phones would fail to connect to the new IP.
+    let (wt_identity, identity) = match persisted
+        .as_ref()
+        .filter(|s| s.lan_ip == lan_ip.to_string())
+    {
+        Some(stored) => match tls::restore_identity(&stored.cert_pem, &stored.key_pem) {
+            Ok(restored) => restored,
+            Err(e) => {
+                warn!(error = %e, "Stored TLS identity unusable — generating a fresh one");
+                tls::generate_identity(lan_ip, cli.dump_certs)?
+            }
+        },
+        None => tls::generate_identity(lan_ip, cli.dump_certs)?,
+    };
 
     // ── Generate pairing PIN ────────────────────────────────────────────
+    // ── Resolve pairing PIN ────────────────────────────────────────
+    // Priority: explicit --pin > persisted PIN > freshly generated. The persisted
+    // number survives restarts until the captain changes it via --pin.
     let pin = match cli.pin {
         Some(pin) => {
-            if pin.len() != 6 || !pin.bytes().all(|b| b.is_ascii_digit()) {
+            if !is_valid_pin(&pin) {
                 anyhow::bail!("--pin must be exactly 6 digits (0-9)");
             }
             pin
         }
-        None => format!("{:06}", rand::random_range(0..1_000_000u32)),
+        None => match persisted.as_ref().map(|s| s.pin.as_str()) {
+            Some(stored) if is_valid_pin(stored) => stored.to_string(),
+            _ => format!("{:06}", rand::random_range(0..1_000_000u32)),
+        },
     };
+
+    // ── Persist whatever this run settled on ───────────────────────
+    // Best-effort: a failed write is logged but never takes the server down.
+    if let Err(e) = persist::save(&persist::PersistedState {
+        lan_ip: lan_ip.to_string(),
+        pin: pin.clone(),
+        token: session_token.lock().clone(),
+        cert_pem: identity.cert_pem.clone(),
+        key_pem: identity.key_pem.clone(),
+    }) {
+        warn!(error = %e, "Could not persist state to disk — values will not survive a restart");
+    }
 
     // ── Print startup banner ────────────────────────────────────────────
     let url = format!("https://{}:{}", url_host(&lan_ip), cli.port);
@@ -257,6 +302,7 @@ async fn run() -> anyhow::Result<()> {
         wt_port: cli.port,
         lan_ip: lan_ip.to_string(),
         pairing_throttle: Arc::new(parking_lot::Mutex::new(server::PairingThrottle::default())),
+        persist: persist::TokenStore::for_app(),
         update_status,
     };
 
@@ -314,6 +360,11 @@ async fn run() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// A valid pairing PIN: exactly six ASCII digits.
+fn is_valid_pin(pin: &str) -> bool {
+    pin.len() == 6 && pin.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Parse the `--ip` argument into an `IpAddr`, tolerating a bracketed IPv6 literal

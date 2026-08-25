@@ -167,6 +167,9 @@ pub(super) async fn handle_pair(
         let mut guard = state.stream.session_token.lock();
         *guard = Some(token.clone());
     }
+    // Persist the rotation so an already-paired phone survives a server restart
+    // without re-entering the PIN. Best-effort: a failed write is logged inside.
+    state.persist.save_token(&token);
 
     info!("Device paired successfully");
 
@@ -191,6 +194,8 @@ pub(super) async fn handle_renew(
             if super::constant_time_eq(expected.as_bytes(), body.token.as_bytes()) {
                 let token = generate_hex_token();
                 *token_guard = Some(token.clone());
+                // Persist the rotated token for the next server start (best-effort).
+                state.persist.save_token(&token);
                 new_token = Some(token);
             }
         }
