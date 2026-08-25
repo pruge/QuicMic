@@ -177,6 +177,7 @@ mod tests {
         NOISE_GATE_MAX,
     };
     use crate::audio::RingBuffer;
+    use crate::persist::TokenStore;
     use crate::tls::TlsIdentity;
     use axum::body::Body;
     use axum::extract::ConnectInfo;
@@ -224,6 +225,8 @@ mod tests {
             wt_port: 8443,
             lan_ip: "192.168.1.42".to_string(),
             pairing_throttle: Arc::new(parking_lot::Mutex::new(PairingThrottle::default())),
+            // Tests must never read or write the real on-disk store.
+            persist: TokenStore::disabled(),
             update_status: Arc::new(parking_lot::Mutex::new(None)),
         }
     }
