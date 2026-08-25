@@ -160,6 +160,80 @@ async function isServerAlive() {
 // fails clearly instead of polling forever.
 const INFO_FETCH_ATTEMPTS = 3;
 
+// ── Server-loss recovery ────────────────────────────────────────
+//
+// A confirmed "server gone" used to lock the PIN input and demand a reload,
+// because the self-signed certificate was regenerated on every server start —
+// a returning server would have invalidated this page's pinned cert hash.
+// Since T01 the TLS identity (and session token) PERSIST across restarts, so
+// that premise is gone: when the server comes back at the same address, its
+// certificate is the same one this page already accepted, and the stored token
+// can simply be renewed. So now we keep the token, probe every few seconds,
+// and renew our way straight back into the main screen — no reload, no PIN.
+// The Reload button stays visible purely as an escape hatch.
+
+const SERVER_WAIT_PROBE_MS = 3000;
+let serverWaitTimer = null;
+
+function stopServerWait() {
+    if (serverWaitTimer) {
+        clearInterval(serverWaitTimer);
+        serverWaitTimer = null;
+    }
+}
+
+/**
+ * Probe until the lost server returns, then reconnect without asking anything.
+ * Runs while the pairing screen shows the "server lost" notice.
+ */
+function waitForServerReturn() {
+    if (serverWaitTimer) return;
+    let probing = false; // one probe in flight even if a cycle overruns
+    serverWaitTimer = setInterval(async () => {
+        if (probing) return;
+        probing = true;
+        try {
+            if (!(await isServerAlive())) return;
+            // The server is back. Its identity persisted (T01), so the pinned
+            // certificate still matches and the stored token should renew.
+            const renewed = await renewToken();
+            stopServerWait();
+            if (renewed) {
+                pairScreen.classList.remove('active');
+                mainScreen.classList.add('active');
+                showToast('Reconnected!');
+                updateServerSettings();
+            } else {
+                // Alive but rejected our token (e.g. another device paired in
+                // the meantime): fall back to ordinary manual pairing.
+                localStorage.removeItem('sessionToken');
+                sessionToken = null;
+                serverLost.hidden = true;
+                pinInput.value = '';
+                pinInput.focus();
+                showToast('Please pair again');
+            }
+        } catch (e) {
+            console.warn('[wait] probe failed:', e);
+        } finally {
+            probing = false;
+        }
+    }, SERVER_WAIT_PROBE_MS);
+}
+
+/**
+ * Register the minimal installability service worker (web/sw.js). Failure is
+ * non-fatal by design: a context where the self-signed certificate was only
+ * clicked through (not installed into the trust store) may refuse worker
+ * registration, and QuicMic must keep working as a plain page there.
+ */
+function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('sw.js').catch((e) => {
+        console.warn('[sw] registration failed (page stays fully usable):', e);
+    });
+}
+
 async function init() {
     for (let attempt = 1; ; attempt++) {
         try {
@@ -197,6 +271,7 @@ async function init() {
         }
     });
     maybeShowUpdateBanner();
+    registerServiceWorker();
     micBtn.addEventListener('click', toggleMic);
     powerSaveBtn.addEventListener('click', togglePowerSave);
     exitPowerSaveBtn.addEventListener('click', togglePowerSave);
@@ -348,8 +423,8 @@ async function renewSessionToken() {
             updateServerSettings();
         } else {
             // renewToken() returns false for both a 503 (server gone) and an invalid
-            // token (server alive). Probe once to tell them apart: gone -> lock+reload,
-            // alive -> re-pair in place.
+            // token (server alive). Probe once to tell them apart: gone -> wait for
+            // the server's return, alive -> re-pair in place.
             const gone = !(await isServerAlive());
             returnToPairing(gone ? 'Server closed' : 'Session expired. Please pair again.', gone);
         }
@@ -374,25 +449,29 @@ function returnToPairing(reason, serverGone = false) {
         powerSaveOverlay.classList.remove('dimmed');
         releaseWakeLock();
     }
-    localStorage.removeItem('sessionToken');
-    sessionToken = null;
     mainScreen.classList.remove('active');
     pairScreen.classList.add('active');
 
     if (serverGone) {
-        // The server is gone. If it comes back it will have a NEW self-signed
-        // certificate (regenerated on every start), so this page's pinned hash and
-        // already-accepted cert are stale: in-page re-pairing would silently fail on
-        // the cert mismatch, and we can't even probe for its return (the mismatch
-        // fails the fetch). A full reload is the only reliable way back — so lock the
-        // PIN entry and prompt a refresh.
+        // The server is gone. Since T01 its TLS identity persists across
+        // restarts, so when it comes back at the same address the certificate
+        // this page already accepted is still valid and the stored session
+        // token can be renewed directly — no reload, no PIN. Keep the token,
+        // keep the inputs usable (manual pairing stays possible, e.g. against
+        // a different address), show the waiting notice, and probe until the
+        // server returns. The Reload button remains as an escape hatch only.
         pinInput.value = '';
-        pinInput.disabled = true;
-        pairBtn.disabled = true;
+        pinInput.disabled = false;
+        pairBtn.disabled = false;
         serverLost.hidden = false;
+        waitForServerReturn();
     } else {
-        // Server still reachable (e.g. the session was taken over): let the user
-        // re-pair in place — the cert is unchanged, so it works without a reload.
+        // Server still reachable, but our session is worthless (e.g. taken over
+        // by another device): drop the stored token and let the user re-pair in
+        // place — the cert is unchanged, so it works without a reload.
+        localStorage.removeItem('sessionToken');
+        sessionToken = null;
+        stopServerWait();
         pinInput.disabled = false;
         pairBtn.disabled = false;
         serverLost.hidden = true;
@@ -654,6 +733,9 @@ async function doPair() {
         if (result.success) {
             sessionToken = result.token;
             localStorage.setItem('sessionToken', sessionToken);
+            // A manual pair ends any pending server-loss auto-reconnect.
+            stopServerWait();
+            serverLost.hidden = true;
             pairScreen.classList.remove('active');
             mainScreen.classList.add('active');
             // Push settings to server after pairing
@@ -690,7 +772,7 @@ async function startStreaming() {
         if (sessionToken) {
             const renewed = await renewToken();
             if (!renewed) {
-                // Distinguish a gone server (lock + reload) from a merely stale
+                // Distinguish a gone server (wait for its return) from a merely stale
                 // session on a live server (re-pair in place).
                 const gone = !(await isServerAlive());
                 returnToPairing(gone ? 'Server closed' : 'Session expired. Please pair again.', gone);
@@ -1391,8 +1473,9 @@ async function reconnectLoop() {
     isReconnecting = false;
     if (isStreaming) {
         // Decide the terminal state with a single probe: a reachable server means
-        // the session is just stale (re-pair in place); an unreachable one means a
-        // reload is needed (the cert changes on restart).
+        // the session is just stale (re-pair in place); an unreachable one means
+        // the server is gone (keep the token and wait for its return — the
+        // identity persists across restarts, see returnToPairing).
         const gone = !(await isServerAlive());
         returnToPairing(gone ? 'Server closed' : 'Session expired. Please pair again.', gone);
     }
