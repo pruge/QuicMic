@@ -139,7 +139,10 @@ pub(super) async fn handle_pair(
                 .into_response();
         }
 
-        if !super::constant_time_eq(body.pin.trim().as_bytes(), state.pairing_pin.as_bytes()) {
+        if !super::constant_time_eq(
+            body.pin.trim().as_bytes(),
+            state.pairing_pin.lock().as_bytes(),
+        ) {
             // The attempted PIN is deliberately not logged — it is a secret (and
             // often a near-miss of the real one).
             let (attempts, locked) = throttle.register_failure(ip, now);

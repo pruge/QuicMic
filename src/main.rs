@@ -4,6 +4,9 @@ mod server;
 mod tls;
 mod update_check;
 
+#[cfg(target_os = "macos")]
+mod menubar;
+
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -97,9 +100,15 @@ struct Cli {
     no_update_check: bool,
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(e) = run().await {
+fn main() {
+    // The async runtime lives on worker threads; the main thread is reserved for
+    // the platform event loop (the macOS menubar owns it — AppKit requires that).
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build async runtime");
+
+    if let Err(e) = platform_entry(&rt) {
         use std::io::IsTerminal;
         // Print the full error chain so the cause is visible even when the app
         // was double-clicked (where the console closes the instant we exit).
@@ -113,7 +122,130 @@ async fn main() {
     }
 }
 
-async fn run() -> anyhow::Result<()> {
+/// Platform entry split. On macOS the server future runs on tokio workers while
+/// the main thread drives the AppKit event loop (menubar); everywhere else the
+/// whole thing is awaited directly.
+fn platform_entry(rt: &tokio::runtime::Runtime) -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        macos_entry(rt)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        rt.block_on(async {
+            match startup().await? {
+                // A never-fired watch channel stands in for the menubar quit signal.
+                Some(started) => {
+                    let (_quit_tx, quit_rx) = tokio::sync::watch::channel(false);
+                    run_to_completion(started, quit_rx).await
+                }
+                None => Ok(()),
+            }
+        })
+    }
+}
+
+/// macOS entry: start the servers on the runtime, hand the main thread to the
+/// menubar event loop, and translate its Quit action into exactly the same
+/// graceful-shutdown path Ctrl+C takes (`run_to_completion`).
+#[cfg(target_os = "macos")]
+fn macos_entry(rt: &tokio::runtime::Runtime) -> anyhow::Result<()> {
+    use std::time::{Duration, Instant};
+
+    let Some(started) = rt.block_on(startup())? else {
+        return Ok(());
+    };
+
+    let (quit_tx, quit_rx) = tokio::sync::watch::channel(false);
+    let quit_tx = Arc::new(quit_tx);
+
+    // Extract what the menubar needs before `started` moves into the server task.
+    let url = started.url.clone();
+    let qr_url = format!("{}#{}", started.url, started.pairing_pin.lock().clone());
+    let pin = started.pairing_pin.clone();
+    let is_connected = started.stream_state.is_connected.clone();
+    let audio_device_ok = started.stream_state.device_ok.clone();
+
+    let done = rt.spawn(run_to_completion(started, quit_rx));
+
+    // Server-side completion, bridged onto a plain slot the main thread (and the
+    // menubar) can poll. Covers two cases: a fatal error surfacing after the
+    // menubar already came up (e.g. a server task crashing mid-run), and waiting
+    // out the graceful-shutdown grace period after Quit.
+    let completion = Arc::new(menubar::ServerCompletion::default());
+    {
+        let completion = completion.clone();
+        let rt_handle = rt.handle().clone();
+        std::thread::spawn(move || {
+            let res = match rt_handle.block_on(done) {
+                Ok(res) => res,
+                Err(e) => Err(anyhow::anyhow!("server task panicked: {e}")),
+            };
+            if let Err(e) = res {
+                *completion.error.lock() = Some(format!("{e:#}"));
+            }
+            completion.finished.store(true, Ordering::SeqCst);
+        });
+    }
+
+    // Blocks the main thread until the user quits (or a fatal error stops the app).
+    let user_quit = menubar::run(menubar::MenubarConfig {
+        url,
+        qr_url,
+        pin,
+        is_connected,
+        audio_device_ok,
+        quit_tx: quit_tx.clone(),
+        completion: completion.clone(),
+    });
+
+    if !user_quit {
+        // A fatal server error stopped the app; surface it.
+        let err = completion.error.lock().clone();
+        match err {
+            Some(e) => anyhow::bail!(e),
+            None => anyhow::bail!("menubar stopped unexpectedly"),
+        }
+    }
+
+    // User chose Quit — the menu action already fired `quit_tx`, which routes
+    // through the exact same graceful shutdown as Ctrl+C. Wait for it to finish
+    // so the process never exits before the grace period has elapsed.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !completion.finished.load(Ordering::SeqCst) {
+        if Instant::now() > deadline {
+            anyhow::bail!("timed out waiting for graceful shutdown");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let err = completion.error.lock().clone();
+    match err {
+        Some(e) => anyhow::bail!(e),
+        None => Ok(()),
+    }
+}
+
+/// Everything `startup` sets up and hands to the shutdown phase.
+struct Started {
+    stream_state: server::StreamState,
+    axum_handle: axum_server::Handle<SocketAddr>,
+    https_task: tokio::task::JoinHandle<anyhow::Result<()>>,
+    wt_task: tokio::task::JoinHandle<anyhow::Result<()>>,
+    /// Live pairing PIN, rotatable by the macOS menubar at runtime. Only read
+    /// by `macos_entry`; on other platforms nothing consumes it, so it is
+    /// exempted from `-D warnings` dead-code there instead of tripping every
+    /// non-macOS CI job.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pairing_pin: Arc<parking_lot::Mutex<String>>,
+    /// Base URL shown in the banner / menubar (no PIN fragment). Same
+    /// macOS-only consumer as `pairing_pin` above.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    url: String,
+}
+
+/// Phase 1 of the old `run`: CLI parsing, state setup, and bringing both servers
+/// up. Returns `None` when the process should exit early (`--list-devices`).
+async fn startup() -> anyhow::Result<Option<Started>> {
     // Install the default CryptoProvider for rustls (using ring)
     rustls::crypto::ring::default_provider()
         .install_default()
@@ -135,7 +267,7 @@ async fn run() -> anyhow::Result<()> {
         for (i, name) in audio::list_output_devices().iter().enumerate() {
             println!("  [{}] {}", i, name);
         }
-        return Ok(());
+        return Ok(None);
     }
 
     set_terminal_title("QuicMic");
@@ -233,9 +365,12 @@ async fn run() -> anyhow::Result<()> {
         }
         None => match persisted.as_ref().map(|s| s.pin.as_str()) {
             Some(stored) if is_valid_pin(stored) => stored.to_string(),
-            _ => format!("{:06}", rand::random_range(0..1_000_000u32)),
+            _ => generate_pin(),
         },
     };
+    // Behind a lock so the macOS menubar's "New PIN" action can rotate it at
+    // runtime without rebuilding the router.
+    let pairing_pin = Arc::new(parking_lot::Mutex::new(pin.clone()));
 
     // ── Persist whatever this run settled on ───────────────────────
     // Best-effort: a failed write is logged but never takes the server down.
@@ -298,7 +433,7 @@ async fn run() -> anyhow::Result<()> {
     let app_state = server::AppState {
         stream: stream_state.clone(),
         tls_identity: identity.clone(),
-        pairing_pin: pin,
+        pairing_pin: pairing_pin.clone(),
         wt_port: cli.port,
         lan_ip: lan_ip.to_string(),
         pairing_throttle: Arc::new(parking_lot::Mutex::new(server::PairingThrottle::default())),
@@ -328,26 +463,51 @@ async fn run() -> anyhow::Result<()> {
         stream_state.clone(),
     ));
 
-    // Listen for Ctrl+C to shutdown gracefully
+    Ok(Some(Started {
+        stream_state,
+        axum_handle,
+        https_task,
+        wt_task,
+        pairing_pin,
+        url,
+    }))
+}
+
+/// Phase 2 of the old `run`: wait for Ctrl+C, a menubar Quit (`external_shutdown`),
+/// or a fatal server error — then shut down gracefully. Both stop signals funnel
+/// into the same `perform_shutdown` routine, so the menubar's Quit IS the Ctrl+C
+/// path, not a reimplementation.
+async fn run_to_completion(
+    started: Started,
+    mut external_shutdown: tokio::sync::watch::Receiver<bool>,
+) -> anyhow::Result<()> {
+    let Started {
+        stream_state,
+        axum_handle,
+        https_task,
+        wt_task,
+        ..
+    } = started;
+
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
-            info!("Graceful shutdown initiated.");
-
-            let had_client = stream_state.is_connected.load(Ordering::SeqCst);
-
-            // Flip the HTTP API to 503 and end the active session. Clients detect
-            // the shutdown by polling the API — their transport close event is
-            // unreliable/late on iOS Safari — so the only thing that matters is
-            // keeping the API up (replying 503) long enough for that poll to land.
-            stream_state.is_shutdown.store(true, Ordering::SeqCst);
-            let _ = stream_state.cancel_tx.send(());
-
-            if had_client {
-                tokio::time::sleep(SHUTDOWN_GRACE_PERIOD).await;
+            perform_shutdown(&stream_state, &axum_handle).await;
+        }
+        _ = async {
+            // Resolves when the menubar's Quit action fires the signal (or when
+            // its sender goes away). No lock guard is held across the await, so
+            // the future stays Send.
+            loop {
+                let fired = match external_shutdown.changed().await {
+                    Ok(()) => *external_shutdown.borrow(),
+                    Err(_) => true,
+                };
+                if fired {
+                    break;
+                }
             }
-
-            axum_handle.graceful_shutdown(Some(std::time::Duration::from_millis(200)));
-            info!("Graceful shutdown complete. Exiting.");
+        } => {
+            perform_shutdown(&stream_state, &axum_handle).await;
         }
         res = https_task => {
             // The HTTPS server returns only on a bind failure or crash — fatal,
@@ -362,9 +522,40 @@ async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The single graceful-shutdown routine, shared verbatim between Ctrl+C and the
+/// menubar Quit action.
+async fn perform_shutdown(
+    stream_state: &server::StreamState,
+    axum_handle: &axum_server::Handle<SocketAddr>,
+) {
+    info!("Graceful shutdown initiated.");
+
+    let had_client = stream_state.is_connected.load(Ordering::SeqCst);
+
+    // Flip the HTTP API to 503 and end the active session. Clients detect
+    // the shutdown by polling the API — their transport close event is
+    // unreliable/late on iOS Safari — so the only thing that matters is
+    // keeping the API up (replying 503) long enough for that poll to land.
+    stream_state.is_shutdown.store(true, Ordering::SeqCst);
+    let _ = stream_state.cancel_tx.send(());
+
+    if had_client {
+        tokio::time::sleep(SHUTDOWN_GRACE_PERIOD).await;
+    }
+
+    axum_handle.graceful_shutdown(Some(std::time::Duration::from_millis(200)));
+    info!("Graceful shutdown complete. Exiting.");
+}
+
 /// A valid pairing PIN: exactly six ASCII digits.
 fn is_valid_pin(pin: &str) -> bool {
     pin.len() == 6 && pin.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Generate a random 6-digit PIN, zero-padded (e.g. "004207"). Shared by startup
+/// and the macOS menubar's "New PIN" action so both produce identical shapes.
+fn generate_pin() -> String {
+    format!("{:06}", rand::random_range(0..1_000_000u32))
 }
 
 /// Parse the `--ip` argument into an `IpAddr`, tolerating a bracketed IPv6 literal
@@ -490,8 +681,16 @@ fn pause_before_exit() {
 
 #[cfg(test)]
 mod tests {
-    use super::{noise_gate_db_to_linear, parse_ip_arg, url_host};
+    use super::{generate_pin, is_valid_pin, noise_gate_db_to_linear, parse_ip_arg, url_host};
     use std::net::IpAddr;
+
+    #[test]
+    fn generated_pins_are_valid_six_digits() {
+        for _ in 0..100 {
+            let pin = generate_pin();
+            assert!(is_valid_pin(&pin), "generated PIN '{pin}' must be 6 digits");
+        }
+    }
 
     #[test]
     fn parse_ip_arg_accepts_bare_and_bracketed() {

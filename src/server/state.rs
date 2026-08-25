@@ -115,7 +115,9 @@ impl PairingThrottle {
 pub struct AppState {
     pub stream: StreamState,
     pub tls_identity: TlsIdentity,
-    pub pairing_pin: String,
+    /// Current pairing PIN. Behind a lock so the macOS menubar can rotate it at
+    /// runtime ("New PIN" action) without rebuilding the router.
+    pub pairing_pin: Arc<parking_lot::Mutex<String>>,
     pub wt_port: u16,
     pub lan_ip: String,
     pub pairing_throttle: Arc<parking_lot::Mutex<PairingThrottle>>,

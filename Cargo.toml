@@ -90,6 +90,42 @@ anyhow = "1"
 http = "1"
 qr2term = "0.3"
 
+# macOS menubar surface (T02): typed Cocoa bindings instead of a full app
+# framework, plus a tiny pure-Rust QR matrix generator (the matrix is rendered
+# to an NSImage by src/menubar.rs). Only linked on macOS; Windows/Linux
+# binaries are unaffected.
+[target.'cfg(target_os = "macos")'.dependencies]
+qrcodegen = "1.8"
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", features = [
+    "std",
+    "NSGeometry",
+    "NSObject",
+    "NSString",
+    "NSTimer",
+] }
+objc2-app-kit = { version = "0.3", features = [
+    "std",
+    "block2",
+    "NSApplication",
+    "NSBezierPath",
+    "NSButton",
+    "NSColor",
+    "NSControl",
+    "NSFont",
+    "NSImage",
+    "NSImageView",
+    "NSPopover",
+    "NSResponder",
+    "NSStatusBar",
+    "NSStatusItem",
+    "NSText",
+    "NSTextField",
+    "NSView",
+    "NSViewController",
+] }
+
 [dev-dependencies]
 # `tower`'s `util` feature provides `ServiceExt::oneshot`, used to drive the axum
 # router in-process for the HTTP API tests (no real socket or audio device).

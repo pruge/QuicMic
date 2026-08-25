@@ -221,7 +221,7 @@ mod tests {
                 cert_der: vec![1, 2, 3],
                 cert_hash_base64: "TESTHASH".to_string(),
             },
-            pairing_pin: "123456".to_string(),
+            pairing_pin: Arc::new(parking_lot::Mutex::new("123456".to_string())),
             wt_port: 8443,
             lan_ip: "192.168.1.42".to_string(),
             pairing_throttle: Arc::new(parking_lot::Mutex::new(PairingThrottle::default())),
