@@ -73,4 +73,27 @@ codesign --force --deep --sign - "$APP"
 # Refresh LaunchServices so the rebuilt bundle (and its LSEnvironment) is picked up.
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" >/dev/null 2>&1 || true
 
-echo "✔ Installed: $APP (launch with 'open -a QuicMic')"
+# LaunchServices needs a moment to accept a freshly written bundle: launching
+# during that window fails with -609, which reads like a broken install. A
+# name-resolution probe is NOT enough - it succeeds while the launch still
+# fails - so the only trustworthy readiness signal is a launch that actually
+# produces a running process.
+if pgrep -f "$APP/Contents/MacOS/quicmic" >/dev/null 2>&1; then
+  echo "✔ Installed: $APP"
+  echo "ℹ️  An older instance is still running - quit it from the menu bar and"
+  echo "   launch again to pick up this build."
+  exit 0
+fi
+
+for _ in $(seq 1 30); do
+  if open -a "$APP" >/dev/null 2>&1 && sleep 2 &&
+     pgrep -f "$APP/Contents/MacOS/quicmic" >/dev/null 2>&1; then
+    echo "✔ Installed and launched: $APP (menu-bar icon, no Dock item)"
+    exit 0
+  fi
+  sleep 1
+done
+
+echo "✔ Installed: $APP" >&2
+echo "⚠️  macOS did not accept the freshly registered app in time." >&2
+echo "   Wait a few seconds and run: open -a QuicMic" >&2
