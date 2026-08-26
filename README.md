@@ -133,7 +133,12 @@ pnpm run app:install  # release build + install /Applications/QuicMic.app (macOS
 
 ### Android wrapper app (optional)
 
-If you'd rather have QuicMic as a standalone home-screen app on Android instead of opening the browser, a thin WebView wrapper lives in [`code/android`](code/android). It loads the same server-provided web UI fullscreen, and handles trust for the self-signed certificate itself (**TOFU**: on first connect it shows the certificate's SHA-256 fingerprint — compare it with the one your PC terminal prints — and pins it once you accept; if the server's certificate ever changes, e.g. after a LAN IP change, it blocks and asks you to re-confirm).
+If you'd rather have QuicMic as a standalone home-screen app on Android instead of opening the browser, a wrapper app lives in [`code/android`](code/android). It opens with a **native two-tab default screen** and hands over to the same server-provided web UI once connected:
+
+- **Home tab** — connection status card, a prominent **"QR 코드로 연결"** button that opens an on-device QR scanner (CameraX + ML Kit, fully offline), a live audio-level meter fed from the embedded web UI's VU meter, and — while connected — the web control surface embedded below it.
+- **Settings tab** — server address display/edit, manual six-digit PIN pairing, and management of pinned certificate fingerprints (**TOFU**: on first connect the app shows the certificate's SHA-256 fingerprint — compare it with the one your PC terminal prints — and pins it once you accept; if the server's certificate ever changes, e.g. after a LAN IP change, it blocks and asks you to re-confirm; each pin can be viewed and deleted here).
+
+Scanning the QR code simply loads `https://<host>:<port>#<pin>` in the embedded WebView, so pairing is performed by the exact same logic as in any browser. The session token stays in WebView localStorage; the app never touches it.
 
 Install it over USB (adb) from a machine with the Android SDK:
 
@@ -142,7 +147,7 @@ pnpm install:quicmic   # build debug APK + install over USB + launch
 pnpm build:android     # build only (code/android/app/build/outputs/apk/debug/)
 ```
 
-The app needs no Play Store and never talks to anything but your LAN server (HTTPS only, cleartext disabled, `INTERNET` is its only permission). Outside your home network it simply shows a "not your home network" notice until you reconnect.
+The app needs no Play Store and never talks to anything but your LAN server (HTTPS only, cleartext disabled; `INTERNET` plus runtime-requested `CAMERA` for QR scanning are its only permissions). Outside your home network it simply shows a "not your home network" notice until you reconnect.
 
 ---
 

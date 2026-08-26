@@ -35,6 +35,10 @@ class TofuStore(context: Context) {
         prefs.edit().remove(key(host, port)).apply()
     }
 
+    /** All pinned endpoints as ("host:port", fingerprint) pairs. */
+    fun entries(): List<Pair<String, String>> =
+        prefs.all.entries.mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.sortedBy { it.first }
+
     companion object {
         private const val PREFS_FILE = "tofu"
 
