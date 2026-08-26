@@ -21,17 +21,20 @@
 //! - The pairing QR encodes the exact same string the terminal prints
 //!   (`url#pin`); rendered as a native image via `qrcodegen`.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, NSObject, NSObjectProtocol};
-use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadOnly};
+use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadOnly, Message};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSBezelStyle, NSBezierPath, NSButton, NSColor,
-    NSFont, NSImage, NSImageView, NSLineCapStyle, NSLineJoinStyle, NSPopover, NSPopoverBehavior,
-    NSStatusBar, NSStatusItem, NSTextAlignment, NSTextField, NSView, NSViewController,
+    NSEvent, NSEventMask, NSFont, NSImage, NSImageView, NSLineCapStyle, NSLineJoinStyle, NSPopover,
+    NSPopoverBehavior, NSStatusBar, NSStatusItem, NSTextAlignment, NSTextField, NSView,
+    NSViewController,
 };
 use objc2_foundation::{
     ns_string, MainThreadMarker, NSPoint, NSRect, NSRectEdge, NSSize, NSString, NSTimer,
@@ -82,6 +85,9 @@ struct CoordinatorIvars {
     /// Whether the event loop ended because the user chose Quit (vs. a fatal
     /// server error stopping the app).
     user_quit: Cell<bool>,
+    /// Live global mouse-down monitor while the popover is open (see
+    /// `show_popover`), removed as soon as it closes.
+    outside_monitor: RefCell<Option<Retained<AnyObject>>>,
 }
 
 define_class!(
@@ -102,7 +108,7 @@ define_class!(
         unsafe fn toggle_popover(&self, _sender: Option<&AnyObject>) {
             let ivars = self.ivars();
             if ivars.popover.isShown() {
-                ivars.popover.close();
+                self.close_popover();
                 return;
             }
             self.refresh_labels();
@@ -113,17 +119,7 @@ define_class!(
                 &button,
                 NSRectEdge::MinY,
             );
-            // A `Transient` popover dismisses itself on an outside click only
-            // while its app is active. This is an accessory (menu-bar-only)
-            // app, so it is NOT activated by clicking the status item, and the
-            // popover stayed open until the item was clicked again. Activating
-            // here restores the ordinary click-outside-to-close behavior.
-            //
-            // `activate()` is the modern replacement but only exists on macOS
-            // 14+; calling a missing selector would crash on older systems, so
-            // the long-standing call is kept deliberately.
-            #[allow(deprecated)]
-            NSApplication::sharedApplication(ivars.mtm).activateIgnoringOtherApps(true);
+            self.watch_for_outside_click();
         }
 
         /// "New PIN": generate a fresh 6-digit number, publish it to the HTTP API
@@ -153,7 +149,7 @@ define_class!(
             let ivars = self.ivars();
             ivars.user_quit.set(true);
             let _ = ivars.config.quit_tx.send(true);
-            ivars.popover.close();
+            self.close_popover();
             NSApplication::sharedApplication(ivars.mtm).stop(None);
         }
 
@@ -164,7 +160,7 @@ define_class!(
             let ivars = self.ivars();
             if ivars.config.completion.finished.load(Ordering::SeqCst) {
                 ivars.user_quit.set(false);
-                ivars.popover.close();
+                self.close_popover();
                 NSApplication::sharedApplication(ivars.mtm).stop(None);
                 return;
             }
@@ -229,6 +225,7 @@ impl Coordinator {
             pin_label,
             status_label,
             user_quit: Cell::new(false),
+            outside_monitor: RefCell::new(None),
         });
         // SAFETY: `init` on NSObject is the designated initializer and the ivars
         // were just installed.
@@ -302,6 +299,47 @@ impl Coordinator {
         std::mem::forget(timer);
 
         coordinator
+    }
+
+    /// Close the popover and drop the outside-click monitor together, so the
+    /// global event tap never outlives the panel it was installed for.
+    fn close_popover(&self) {
+        let ivars = self.ivars();
+        ivars.popover.close();
+        if let Some(monitor) = ivars.outside_monitor.borrow_mut().take() {
+            // SAFETY: the token came from `addGlobalMonitorForEventsMatchingMask`.
+            unsafe { NSEvent::removeMonitor(&monitor) };
+        }
+    }
+
+    /// Dismiss the popover when the next click lands in ANY other app.
+    ///
+    /// A `Transient` popover normally does this by itself, but only while its
+    /// app is active - and an accessory (menu-bar-only) app is not activated by
+    /// a status-item click, so AppKit never delivered that outside click and
+    /// the panel stayed open until the icon was clicked again. Forcing
+    /// activation does not help on current macOS, so the clicks are watched
+    /// directly, which is what menu-bar apps do in practice. The monitor is
+    /// global (other apps only): clicks INSIDE the popover stay with the
+    /// popover, so its buttons keep working.
+    fn watch_for_outside_click(&self) {
+        let ivars = self.ivars();
+        if ivars.outside_monitor.borrow().is_some() {
+            return;
+        }
+        let this: Retained<Self> = self.retain();
+        let handler = RcBlock::new(move |_event: NonNull<NSEvent>| {
+            if this.ivars().popover.isShown() {
+                this.close_popover();
+            }
+        });
+        let monitor = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(
+            NSEventMask::LeftMouseDown
+                | NSEventMask::RightMouseDown
+                | NSEventMask::OtherMouseDown,
+            &handler,
+        );
+        *ivars.outside_monitor.borrow_mut() = monitor;
     }
 
     fn refresh_labels(&self) {
