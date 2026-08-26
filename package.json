@@ -7,11 +7,12 @@
     "dev": "cargo run --release",
     "build": "cargo build --release",
     "test": "cargo test",
-    "app:install": "cargo build --release && bash scripts/make-app.sh",
+    "build:mac": "pnpm run build",
     "build:android": "cd code/android && ./gradlew assembleDebug",
     "dev:quicmic": "pnpm run dev",
     "build:quicmic": "pnpm run build",
     "test:quicmic": "pnpm run test",
-    "install:quicmic": "bash scripts/android-install.sh"
+    "install:mac": "cargo build --release && bash scripts/make-app.sh",
+    "install:android": "bash scripts/android-install.sh"
   }
 }

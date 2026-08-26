@@ -126,10 +126,10 @@ If you use pnpm, the root `package.json` exposes the common Cargo workflows as s
 pnpm dev              # cargo run --release
 pnpm build            # cargo build --release
 pnpm test             # cargo test
-pnpm run app:install  # release build + install /Applications/QuicMic.app (macOS)
+pnpm install:mac      # release build + install /Applications/QuicMic.app (macOS)
 ```
 
-`app:install` wraps `scripts/make-app.sh`, which bundles the release binary into a menu-bar-only (`LSUIElement`) app bundle and ad-hoc signs it. Launch it afterwards with `open -a QuicMic`. To pin the audio output device at install time, set `QUICMIC_DEVICE` (or pass `--device <name>` to the script): e.g. `QUICMIC_DEVICE="VB-Cable" pnpm run app:install`. Note there is deliberately **no** `install` script — that name would collide with pnpm's built-in dependency install.
+`install:mac` wraps `scripts/make-app.sh`, which bundles the release binary into a menu-bar-only (`LSUIElement`) app bundle and ad-hoc signs it. Launch it afterwards with `open -a QuicMic`. To pin the audio output device at install time, set `QUICMIC_DEVICE` (or pass `--device <name>` to the script): e.g. `QUICMIC_DEVICE="VB-Cable" pnpm install:mac`. Note there is deliberately **no** `install` script — that name would collide with pnpm's built-in dependency install.
 
 ### Android wrapper app (optional)
 
@@ -143,7 +143,7 @@ Scanning the QR code simply loads `https://<host>:<port>#<pin>` in the embedded 
 Install it over USB (adb) from a machine with the Android SDK:
 
 ```bash
-pnpm install:quicmic   # build debug APK + install over USB + launch
+pnpm install:android  # build debug APK + install over USB + launch
 pnpm build:android     # build only (code/android/app/build/outputs/apk/debug/)
 ```
 
