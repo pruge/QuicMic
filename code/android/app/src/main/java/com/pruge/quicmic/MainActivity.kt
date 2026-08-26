@@ -215,6 +215,13 @@ class MainActivity : Activity() {
      */
     @SuppressLint("SetJavaScriptEnabled")
     private fun connectTo(host: String, pin: String? = null) {
+        // The TOFU check reads serverHost to look up the stored fingerprint —
+        // on a restart it was still null here, so every SSL error was silently
+        // cancelled and the app fell back to the offline/QR screen forever.
+        // Restore the host from prefs before anything touches the network.
+        if (serverHost == null) {
+            serverHost = addressPrefs.getString(PREF_HOST, null) ?: host
+        }
         setConn(Conn.CONNECTING)
         pageLoaded = false
         val url = "https://$host:${ServerDiscovery.PORT}/" + (pin?.let { "#$it" } ?: "")
