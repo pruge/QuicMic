@@ -313,10 +313,16 @@ class MainActivity : Activity() {
             toast("QR 에 QuicMic 주소가 없습니다")
             return
         }
-        useHost(payload.host + ":" + payload.port)
-        // Hand the PIN to the web UI as the hash fragment: its own pairing
-        // flow clears stale tokens and pairs automatically (rationale: zero
-        // duplicated pairing logic; token stays in WebView localStorage only).
+        // Save the host, then load exactly once with the PIN as the hash.
+        // Loading twice (unhashed first) used to race: the unhashed page won,
+        // showed the PIN screen, and pairing never completed — so every app
+        // restart demanded a fresh QR scan. Single load: the page's own
+        // auto-pairing runs, the token lands in localStorage, and restarts
+        // reconnect silently (rationale: zero duplicated pairing logic).
+        serverHost = payload.host
+        addressPrefs.edit().putString(PREF_HOST, payload.host).apply()
+        refreshSettings()
+        selectTab(0)
         connectTo(payload.host, payload.pin)
     }
 
