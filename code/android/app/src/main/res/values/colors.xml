@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mirrors the web UI palette (code/web/style.css). -->
+    <color name="text_primary">#E8E8F0</color>
+    <color name="text_secondary">#8888A0</color>
+    <color name="accent">#6C63FF</color>
+</resources>

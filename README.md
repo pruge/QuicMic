@@ -131,6 +131,19 @@ pnpm run app:install  # release build + install /Applications/QuicMic.app (macOS
 
 `app:install` wraps `scripts/make-app.sh`, which bundles the release binary into a menu-bar-only (`LSUIElement`) app bundle and ad-hoc signs it. Launch it afterwards with `open -a QuicMic`. To pin the audio output device at install time, set `QUICMIC_DEVICE` (or pass `--device <name>` to the script): e.g. `QUICMIC_DEVICE="VB-Cable" pnpm run app:install`. Note there is deliberately **no** `install` script — that name would collide with pnpm's built-in dependency install.
 
+### Android wrapper app (optional)
+
+If you'd rather have QuicMic as a standalone home-screen app on Android instead of opening the browser, a thin WebView wrapper lives in [`code/android`](code/android). It loads the same server-provided web UI fullscreen, and handles trust for the self-signed certificate itself (**TOFU**: on first connect it shows the certificate's SHA-256 fingerprint — compare it with the one your PC terminal prints — and pins it once you accept; if the server's certificate ever changes, e.g. after a LAN IP change, it blocks and asks you to re-confirm).
+
+Install it over USB (adb) from a machine with the Android SDK:
+
+```bash
+pnpm install:quicmic   # build debug APK + install over USB + launch
+pnpm build:android     # build only (code/android/app/build/outputs/apk/debug/)
+```
+
+The app needs no Play Store and never talks to anything but your LAN server (HTTPS only, cleartext disabled, `INTERNET` is its only permission). Outside your home network it simply shows a "not your home network" notice until you reconnect.
+
 ---
 
 ## 🚀 Usage

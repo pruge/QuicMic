@@ -1,0 +1,9 @@
+[versions]
+# Build tooling — deliberately identical to the reference toolchain so the
+# local Gradle cache (already holding these artifacts) is reused verbatim.
+agp = "8.7.3"
+kotlin = "2.1.0"
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
