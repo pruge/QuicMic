@@ -118,6 +118,19 @@ Then `cargo build` works normally. This is a one-time, machine-local toolchain s
 
 </details>
 
+### pnpm tasks (optional)
+
+If you use pnpm, the root `package.json` exposes the common Cargo workflows as scripts (no JS dependencies are installed — pnpm is purely a task runner here):
+
+```bash
+pnpm dev              # cargo run --release
+pnpm build            # cargo build --release
+pnpm test             # cargo test
+pnpm run app:install  # release build + install /Applications/QuicMic.app (macOS)
+```
+
+`app:install` wraps `scripts/make-app.sh`, which bundles the release binary into a menu-bar-only (`LSUIElement`) app bundle and ad-hoc signs it. Launch it afterwards with `open -a QuicMic`. Note there is deliberately **no** `install` script — that name would collide with pnpm's built-in dependency install.
+
 ---
 
 ## 🚀 Usage

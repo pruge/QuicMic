@@ -1,0 +1,12 @@
+{
+  "name": "quicmic",
+  "version": "0.0.0",
+  "private": true,
+  "description": "pnpm task runner for the QuicMic Rust workspace (no JS dependencies)",
+  "scripts": {
+    "dev": "cargo run --release",
+    "build": "cargo build --release",
+    "test": "cargo test",
+    "app:install": "cargo build --release && bash scripts/make-app.sh"
+  }
+}
