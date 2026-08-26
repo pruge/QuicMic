@@ -52,7 +52,7 @@ pub fn list_output_devices() -> Vec<String> {
 const DEFAULT_DEVICE: &str = "CABLE Input";
 
 #[cfg(target_os = "macos")]
-const DEFAULT_DEVICE: &str = "BlackHole";
+const DEFAULT_DEVICE: &str = "VB-Cable";
 
 #[cfg(target_os = "linux")]
 const DEFAULT_DEVICE: &str = "VirtualQuicMic";
