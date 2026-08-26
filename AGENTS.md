@@ -352,6 +352,14 @@ AppState {             // HTTP-layer only (extends StreamState)
 
 13. **Persistent state (`src/persist.rs`).** The TLS identity, pairing PIN, and session token survive restarts via one JSON document at the platform per-user app-data dir (`~/Library/Application Support/QuicMic/state.json` on macOS, `%APPDATA%\QuicMic` on Windows, XDG data dir on Linux). The file holds the private key and the PIN, so it is written `0600` (dir `0700`) on Unix through a temp-file + rename (atomic; readers never see a torn document). Startup resolution order: **TLS** — reuse stored cert only if its recorded `lan_ip` matches the current LAN IP (SANs are baked in), else regenerate + save; **PIN** — explicit `--pin` wins and becomes the new persisted value, else stored PIN, else generated; **token** — seeded from disk into `StreamState.session_token`, and every rotation (`/api/pair`, `/api/renew`) is re-persisted via `AppState.persist: TokenStore`. All persistence is best-effort: failures are logged, never fatal. Tests use `TokenStore::disabled()` — the router fixtures must never touch the real store. Cert PEM round-trips through `tls::restore_identity`, which re-derives DER + SHA-256 hash so `/api/info`'s `cert_hash` stays stable across restarts.
 
+14. **Android wrapper app (`code/android`).** A thin Kotlin WebView shell around the server-provided web UI (the app itself stays nearly frozen — all UI logic streams from the server). Key facts:
+    - **Toolchain pinned** to Gradle 8.11.1 / AGP 8.7.3 / Kotlin 2.1.0 (same versions as the jinwooauto reference project) so the local Gradle cache serves every artifact; the wrapper jar is git-tracked. Do not bump these versions casually.
+    - **Zero library dependencies**: framework APIs only (WebView, HttpsURLConnection, java.security), keeping downloads to the toolchain itself.
+    - **TOFU trust lives in the app** (`TofuStore.kt`): SHA-256 of the leaf certificate's DER pinned per `host:port` in app-private prefs; first use shows a consent dialog, a later mismatch blocks and requires explicit re-confirmation. The server (Rust) is unchanged by this feature.
+    - The session token lives in **WebView localStorage** — reconnect/pairing logic is entirely the web UI's; the app must never touch it.
+    - `pnpm build:android` → `gradlew assembleDebug`; `pnpm install:quicmic` → `scripts/android-install.sh` (build + adb USB install `-r -d` + launch). Note `install:quicmic` was **repurposed** from the macOS .app path, which remains `app:install` only.
+    - HTTPS only: `usesCleartextTraffic="false"`, and `INTERNET` is the sole declared permission. Server address resolution order: stored pref → LAN /24 probe on :8443 (verified via open `/api/info`) → manual entry.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

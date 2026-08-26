@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Framework theme only (no AppCompat dependency): dark, no action bar,
+         matching the web UI's dark palette. -->
+    <style name="Theme.QuicMic" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0a0a0f</item>
+        <item name="android:statusBarColor">#0a0a0f</item>
+        <item name="android:navigationBarColor">#0a0a0f</item>
+        <item name="android:colorAccent">#6c63ff</item>
+    </style>
+</resources>
