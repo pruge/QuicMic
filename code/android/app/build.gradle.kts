@@ -22,6 +22,11 @@ android {
         }
     }
 
+    buildFeatures {
+        // BuildConfig.VERSION_NAME is shown on the settings tab.
+        buildConfig = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -32,8 +37,14 @@ android {
     }
 }
 
-// Intentionally empty: the wrapper uses only framework APIs (WebView,
-// HttpsURLConnection, java.security) so the build needs no artifact downloads
-// beyond the pinned Gradle/AGP/Kotlin toolchain itself.
+// Framework APIs plus exactly two feature libraries for the native home /
+// settings screens (T04): CameraX drives the scanner preview and ML Kit's
+// bundled barcode model decodes QR frames fully on-device. Versions are
+// pinned in gradle/libs.versions.toml.
 dependencies {
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.mlkit.barcode.scanning)
 }
