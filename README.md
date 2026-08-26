@@ -129,7 +129,7 @@ pnpm test             # cargo test
 pnpm run app:install  # release build + install /Applications/QuicMic.app (macOS)
 ```
 
-`app:install` wraps `scripts/make-app.sh`, which bundles the release binary into a menu-bar-only (`LSUIElement`) app bundle and ad-hoc signs it. Launch it afterwards with `open -a QuicMic`. Note there is deliberately **no** `install` script — that name would collide with pnpm's built-in dependency install.
+`app:install` wraps `scripts/make-app.sh`, which bundles the release binary into a menu-bar-only (`LSUIElement`) app bundle and ad-hoc signs it. Launch it afterwards with `open -a QuicMic`. To pin the audio output device at install time, set `QUICMIC_DEVICE` (or pass `--device <name>` to the script): e.g. `QUICMIC_DEVICE="VB-Cable" pnpm run app:install`. Note there is deliberately **no** `install` script — that name would collide with pnpm's built-in dependency install.
 
 ---
 

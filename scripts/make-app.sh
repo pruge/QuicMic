@@ -35,9 +35,46 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-cp -f "$BIN" "$APP/Contents/MacOS/quicmic"
+# Optional output device override: --device <name> flag or QUICMIC_DEVICE env var.
+# Recorded into Contents/device.conf; the wrapper exec adds --device at launch.
+DEVICE="${QUICMIC_DEVICE:-}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --device)
+      [ $# -ge 2 ] || { echo "error: --device requires a value" >&2; exit 1; }
+      DEVICE="$2"
+      shift 2
+      ;;
+    *) echo "error: unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
 
-# Ad-hoc sign so Gatekeeper/local execution is clean
-codesign --force --sign - "$APP"
+# Real binary lives under a different name; Contents/MacOS/quicmic is a wrapper.
+cp -f "$BIN" "$APP/Contents/MacOS/quicmic.bin"
+rm -f "$APP/Contents/device.conf"
+if [ -n "$DEVICE" ]; then
+  printf '%s\n' "$DEVICE" > "$APP/Contents/device.conf"
+fi
+
+cat > "$APP/Contents/MacOS/quicmic" <<'WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+ARGS=()
+# QUICMIC_DEVICE env var wins over the bundled device.conf.
+if [ -n "${QUICMIC_DEVICE:-}" ]; then
+  ARGS+=(--device "$QUICMIC_DEVICE")
+elif [ -f "$DIR/../device.conf" ]; then
+  DEV="$(head -n 1 "$DIR/../device.conf")"
+  if [ -n "$DEV" ]; then
+    ARGS+=(--device "$DEV")
+  fi
+fi
+exec "$DIR/quicmic.bin" "${ARGS[@]}"
+WRAPPER
+chmod +x "$APP/Contents/MacOS/quicmic"
+
+# Ad-hoc sign so Gatekeeper/local execution is clean (--deep seals device.conf)
+codesign --force --deep --sign - "$APP"
 
 echo "✔ Installed: $APP (launch with 'open -a QuicMic')"
