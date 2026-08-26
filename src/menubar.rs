@@ -113,6 +113,17 @@ define_class!(
                 &button,
                 NSRectEdge::MinY,
             );
+            // A `Transient` popover dismisses itself on an outside click only
+            // while its app is active. This is an accessory (menu-bar-only)
+            // app, so it is NOT activated by clicking the status item, and the
+            // popover stayed open until the item was clicked again. Activating
+            // here restores the ordinary click-outside-to-close behavior.
+            //
+            // `activate()` is the modern replacement but only exists on macOS
+            // 14+; calling a missing selector would crash on older systems, so
+            // the long-standing call is kept deliberately.
+            #[allow(deprecated)]
+            NSApplication::sharedApplication(ivars.mtm).activateIgnoringOtherApps(true);
         }
 
         /// "New PIN": generate a fresh 6-digit number, publish it to the HTTP API
