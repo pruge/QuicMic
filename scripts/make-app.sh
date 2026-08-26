@@ -70,7 +70,7 @@ elif [ -f "$DIR/../device.conf" ]; then
     ARGS+=(--device "$DEV")
   fi
 fi
-exec "$DIR/quicmic.bin" "${ARGS[@]}"
+exec "$DIR/quicmic.bin" ${ARGS[@]+"${ARGS[@]}"}
 WRAPPER
 chmod +x "$APP/Contents/MacOS/quicmic"
 
