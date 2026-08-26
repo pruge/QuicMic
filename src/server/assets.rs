@@ -10,7 +10,7 @@ use axum::http::{header, HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 
 #[derive(rust_embed::RustEmbed)]
-#[folder = "web/"]
+#[folder = "code/web/"]
 struct Asset;
 
 /// Local `web/` override directories, in lookup precedence order:
@@ -248,7 +248,7 @@ mod embed_tests {
             let src = icon["src"].as_str().expect("icon src");
             let sizes = icon["sizes"].as_str().expect("icon sizes");
             let purpose = icon["purpose"].as_str().unwrap_or("any");
-            let data = Asset::get(src).unwrap_or_else(|| panic!("icon {src} missing from web/"));
+            let data = Asset::get(src).unwrap_or_else(|| panic!("icon {src} missing from code/web/"));
             let (w, h) = png_dimensions(&data.data);
             let declared = sizes
                 .split('x')

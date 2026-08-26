@@ -224,7 +224,7 @@ web/
 └── worklet.js
 ```
 
-Assets are served with a content-based `ETag` and `Cache-Control: no-cache`, so your edits show up on the next reload instead of being cached. Copy the originals from this repository's [`web/`](web/) directory as a starting point.
+Assets are served with a content-based `ETag` and `Cache-Control: no-cache`, so your edits show up on the next reload instead of being cached. Copy the originals from this repository's [`code/web/`](code/web/) directory as a starting point.
 
 ---
 
@@ -312,4 +312,4 @@ CI runs formatting on Linux and clippy + tests across **Linux, Windows, and macO
 
 Licensed under the **GNU General Public License v3.0 or later** — see [`LICENSE.md`](LICENSE.md).
 
-The macOS menu-bar icon and web UI iconography use the **microphone** icon from [Tabler Icons](https://github.com/tabler/tabler-icons) (MIT License, © Paweł Kuna), vendored unmodified at [`web/vendor/tabler/`](web/vendor/tabler/) together with its license text; the file is embedded into every distributed binary via `rust-embed`.
+The macOS menu-bar icon and web UI iconography use the **microphone** icon from [Tabler Icons](https://github.com/tabler/tabler-icons) (MIT License, © Paweł Kuna), vendored unmodified at [`code/web/vendor/tabler/`](code/web/vendor/tabler/) together with its license text; the file is embedded into every distributed binary via `rust-embed`.
