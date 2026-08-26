@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.http.SslError
@@ -15,6 +16,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.SslErrorHandler
+import android.webkit.PermissionRequest
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -63,6 +66,9 @@ class MainActivity : Activity() {
     /** True while a TOFU dialog is up — suppresses the offline screen that the
      *  cancelled load would otherwise trigger underneath. */
     private var pendingTofu = false
+
+    /** Page permission ask awaiting the RECORD_AUDIO runtime answer. */
+    private var pendingMicRequest: PermissionRequest? = null
 
     /** True while the mismatch/blocking screen is shown. */
     private var showingMismatch = false
@@ -229,6 +235,33 @@ class MainActivity : Activity() {
             allowContentAccess = false
         }
         view.isFocusableInTouchMode = true
+        view.webChromeClient = object : WebChromeClient() {
+            /**
+             * getUserMedia from the embedded page lands here. Grant only the
+             * audio capture resource, and only once RECORD_AUDIO is a
+             * runtime-granted permission — otherwise deny so the page shows
+             * its own error instead of silently capturing nothing.
+             */
+            override fun onPermissionRequest(request: PermissionRequest) {
+                val wanted = request.resources?.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE) == true
+                if (!wanted) { request.deny(); return }
+                runOnUiThread {
+                    val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                        this@MainActivity, android.Manifest.permission.RECORD_AUDIO
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (granted) {
+                        request.grant(request.resources)
+                    } else {
+                        pendingMicRequest = request
+                        androidx.core.app.ActivityCompat.requestPermissions(
+                            this@MainActivity,
+                            arrayOf(android.Manifest.permission.RECORD_AUDIO),
+                            REQ_MIC
+                        )
+                    }
+                }
+            }
+        }
         view.webViewClient = object : WebViewClient() {
 
             override fun onPageFinished(view: WebView, url: String) {
@@ -299,6 +332,24 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------------
     // QR scanning & manual pairing
     // ---------------------------------------------------------------------
+
+    @Deprecated("Deprecated in Java")
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_MIC) return
+        val request = pendingMicRequest
+        pendingMicRequest = null
+        if (request == null) return
+        if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            request.grant(request.resources)
+        } else {
+            request.deny()
+        }
+    }
 
     private fun launchScanner() {
         startActivityForResult(Intent(this, ScanActivity::class.java), REQ_SCAN)
@@ -647,6 +698,7 @@ class MainActivity : Activity() {
     companion object {
         private const val PREF_HOST = "host"
         private const val REQ_SCAN = 4202
+        private const val REQ_MIC = 4203
         private const val OFFLINE_TAG = "quicmic_offline"
         private const val MISMATCH_TAG = "quicmic_mismatch"
 
