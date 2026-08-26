@@ -123,13 +123,15 @@ Then `cargo build` works normally. This is a one-time, machine-local toolchain s
 If you use pnpm, the root `package.json` exposes the common Cargo workflows as scripts (no JS dependencies are installed — pnpm is purely a task runner here):
 
 ```bash
-pnpm dev              # cargo run --release
-pnpm build            # cargo build --release
-pnpm test             # cargo test
+pnpm dev:mac          # cargo run --release (terminal QR + menu bar)
+pnpm build:mac        # cargo build --release
+pnpm test:mac         # cargo test
 pnpm install:mac      # release build + install /Applications/QuicMic.app (macOS)
 ```
 
-`install:mac` wraps `scripts/make-app.sh`, which bundles the release binary into a menu-bar-only (`LSUIElement`) app bundle and ad-hoc signs it. Launch it afterwards with `open -a QuicMic`. To pin the audio output device at install time, set `QUICMIC_DEVICE` (or pass `--device <name>` to the script): e.g. `QUICMIC_DEVICE="VB-Cable" pnpm install:mac`. Note there is deliberately **no** `install` script — that name would collide with pnpm's built-in dependency install.
+The short `dev` / `build` / `test` names still work; the `:mac` / `:android` suffixes exist so every platform is named the same way.
+
+`install:mac` wraps `scripts/make-app.sh`, which bundles the release binary into a menu-bar-only (`LSUIElement`) app bundle and ad-hoc signs it. The binary itself is the bundle executable — no launcher script — because LaunchServices only ties a running process to its bundle that way, and without that tie the server runs but no menu-bar item ever appears. Launch it afterwards with `open -a QuicMic`. To pin the audio output device at install time, set `QUICMIC_DEVICE` (or pass `--device <name>` to the script): e.g. `QUICMIC_DEVICE="VB-Cable" pnpm install:mac` — the value is baked into the bundle's `LSEnvironment`, so it applies when the app is launched from Finder/Launchpad too. Note there is deliberately **no** `install` script — that name would collide with pnpm's built-in dependency install.
 
 ### Android wrapper app (optional)
 
@@ -147,7 +149,7 @@ pnpm install:android  # build debug APK + install over USB + launch
 pnpm build:android     # build only (code/android/app/build/outputs/apk/debug/)
 ```
 
-The app needs no Play Store and never talks to anything but your LAN server (HTTPS only, cleartext disabled; `INTERNET` plus runtime-requested `CAMERA` for QR scanning are its only permissions). Outside your home network it simply shows a "not your home network" notice until you reconnect.
+The app needs no Play Store and never talks to anything but your LAN server (HTTPS only, cleartext disabled; `INTERNET`, `RECORD_AUDIO` + `MODIFY_AUDIO_SETTINGS` for microphone capture, and runtime-requested `CAMERA` for QR scanning are its only permissions). Outside your home network it simply shows a "not your home network" notice until you reconnect.
 
 ---
 
