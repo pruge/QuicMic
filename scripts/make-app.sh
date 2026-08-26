@@ -16,27 +16,12 @@ if [ ! -x "$BIN" ]; then
   exit 1
 fi
 
-mkdir -p "$APP/Contents/MacOS"
-
-cat > "$APP/Contents/Info.plist" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleName</key>            <string>QuicMic</string>
-  <key>CFBundleDisplayName</key>     <string>QuicMic</string>
-  <key>CFBundleIdentifier</key>      <string>com.pruge.QuicMic</string>
-  <key>CFBundleVersion</key>         <string>1.0</string>
-  <key>CFBundleShortVersionString</key> <string>1.0</string>
-  <key>CFBundleExecutable</key>      <string>quicmic</string>
-  <key>CFBundlePackageType</key>     <string>APPL</string>
-  <key>LSUIElement</key>             <true/>
-</dict>
-</plist>
-PLIST
-
 # Optional output device override: --device <name> flag or QUICMIC_DEVICE env var.
-# Recorded into Contents/device.conf; the wrapper exec adds --device at launch.
+# The binary itself reads QUICMIC_DEVICE (clap env), so the value is baked into
+# the bundle's LSEnvironment instead of a launcher script: LaunchServices only
+# associates a process with its bundle when CFBundleExecutable IS the real
+# binary, and a shell wrapper broke that association - the server ran but no
+# menu-bar item could ever appear.
 DEVICE="${QUICMIC_DEVICE:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -49,32 +34,43 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# Real binary lives under a different name; Contents/MacOS/quicmic is a wrapper.
-cp -f "$BIN" "$APP/Contents/MacOS/quicmic.bin"
-rm -f "$APP/Contents/device.conf"
+mkdir -p "$APP/Contents/MacOS"
+rm -f "$APP/Contents/MacOS/quicmic.bin" "$APP/Contents/device.conf"
+
+LSENV=""
 if [ -n "$DEVICE" ]; then
-  printf '%s\n' "$DEVICE" > "$APP/Contents/device.conf"
+  LSENV="  <key>LSEnvironment</key>
+  <dict>
+    <key>QUICMIC_DEVICE</key> <string>$DEVICE</string>
+  </dict>
+"
 fi
 
-cat > "$APP/Contents/MacOS/quicmic" <<'WRAPPER'
-#!/usr/bin/env bash
-set -euo pipefail
-DIR="$(cd "$(dirname "$0")" && pwd)"
-ARGS=()
-# QUICMIC_DEVICE env var wins over the bundled device.conf.
-if [ -n "${QUICMIC_DEVICE:-}" ]; then
-  ARGS+=(--device "$QUICMIC_DEVICE")
-elif [ -f "$DIR/../device.conf" ]; then
-  DEV="$(head -n 1 "$DIR/../device.conf")"
-  if [ -n "$DEV" ]; then
-    ARGS+=(--device "$DEV")
-  fi
-fi
-exec "$DIR/quicmic.bin" ${ARGS[@]+"${ARGS[@]}"}
-WRAPPER
+cat > "$APP/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>            <string>QuicMic</string>
+  <key>CFBundleDisplayName</key>     <string>QuicMic</string>
+  <key>CFBundleIdentifier</key>      <string>com.pruge.QuicMic</string>
+  <key>CFBundleVersion</key>         <string>1.0</string>
+  <key>CFBundleShortVersionString</key> <string>1.0</string>
+  <key>CFBundleExecutable</key>      <string>quicmic</string>
+  <key>CFBundlePackageType</key>     <string>APPL</string>
+  <key>NSMicrophoneUsageDescription</key> <string>QuicMic streams your phone's microphone into a virtual audio device.</string>
+  <key>LSUIElement</key>             <true/>
+$LSENV</dict>
+</plist>
+PLIST
+
+# The real binary IS the bundle executable - no wrapper (see the note above).
+cp -f "$BIN" "$APP/Contents/MacOS/quicmic"
 chmod +x "$APP/Contents/MacOS/quicmic"
 
 # Ad-hoc sign so Gatekeeper/local execution is clean (--deep seals device.conf)
 codesign --force --deep --sign - "$APP"
+# Refresh LaunchServices so the rebuilt bundle (and its LSEnvironment) is picked up.
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" >/dev/null 2>&1 || true
 
 echo "✔ Installed: $APP (launch with 'open -a QuicMic')"
