@@ -54,10 +54,10 @@ QuicMic outputs to a virtual device. Install one and (optionally) pass its name 
 </details>
 
 <details>
-<summary><b>macOS</b> — BlackHole</summary>
+<summary><b>macOS</b> — VB-Cable (or BlackHole)</summary>
 
-1. Install [BlackHole](https://existential.audio/blackhole/) (e.g. `brew install blackhole-2ch`). QuicMic's default device name is **`BlackHole`**.
-2. Select **BlackHole** as the input device in your target app.
+1. Install [VB-CABLE](https://vb-audio.com/Cable/) (`brew install --cask blackhole-2ch` also works with [BlackHole](https://existential.audio/blackhole/)). QuicMic's default device on macOS is **`VB-Cable`**; BlackHole users should pass `--device BlackHole`.
+2. Select **VB-Cable** (or BlackHole) as the input device in your target app.
 
 </details>
 

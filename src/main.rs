@@ -56,7 +56,7 @@ struct Cli {
     port: u16,
 
     /// Audio output device name (substring match, case-insensitive).
-    /// Defaults to "CABLE Input" (Windows), "BlackHole" (macOS), or "VirtualQuicMic" (Linux).
+    /// Defaults to "CABLE Input" (Windows), "VB-Cable" (macOS), or "VirtualQuicMic" (Linux).
     #[arg(short, long, env = "QUICMIC_DEVICE")]
     device: Option<String>,
 
